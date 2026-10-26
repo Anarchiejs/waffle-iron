@@ -1,0 +1,8 @@
+/build/
+/out/
+/vcpkg_installed/
+/.orchestra/
+/.vs/
+*.user
+CMakeUserPresets.json
+*.log

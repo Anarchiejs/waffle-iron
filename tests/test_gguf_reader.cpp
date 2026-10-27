@@ -146,6 +146,35 @@ TEST_CASE("GGUF : erreurs et scan récursif filtré", "[gguf_reader]") {
     CHECK_THROWS_AS(banc::read_gguf(invalid), banc::Error);
 }
 
+TEST_CASE("GGUF : blobs Ollama nommés par les manifestes, drafts masqués", "[gguf_reader]") {
+    banc::test::TempDir temp("ollama");
+    const auto blobs = temp.path / "blobs";
+    const auto manifest_dir = temp.path / "manifests" / "registry.ollama.ai" / "library" / "gemma4";
+    std::filesystem::create_directories(blobs);
+    std::filesystem::create_directories(manifest_dir);
+    for (const auto* name : {"sha256-aaa1", "sha256-bbb2", "sha256-ccc3"}) banc::test::write_l1_model(blobs / name);
+    {
+        std::ofstream file(manifest_dir / "e4b", std::ios::binary);
+        file << R"({"schemaVersion":2,"layers":[)"
+             << R"({"mediaType":"application/vnd.ollama.image.model","digest":"sha256:aaa1","size":1},)"
+             << R"({"digest":"sha256:bbb2","mediaType":"application/vnd.ollama.image.draft","size":1}]})";
+    }
+    const auto model = banc::find_ollama_blob(blobs / "sha256-aaa1");
+    REQUIRE(model.has_value());
+    CHECK(model->tags == "gemma4:e4b");
+    CHECK(model->model);
+    const auto draft = banc::find_ollama_blob(blobs / "sha256-bbb2");
+    REQUIRE(draft.has_value());
+    CHECK_FALSE(draft->model);
+    CHECK_FALSE(banc::find_ollama_blob(blobs / "sha256-ccc3").has_value()); // orphelin : gardé tel quel
+
+    const auto paths = banc::scan_model_dirs({blobs});
+    REQUIRE(paths.size() == 2);
+    CHECK(paths[0].filename() == "sha256-aaa1");
+    CHECK(paths[1].filename() == "sha256-ccc3");
+    CHECK(banc::read_gguf(paths[0], false).name == "gemma4:e4b (Ollama)");
+}
+
 TEST_CASE("GGUF : dossiers de modèles par défaut", "[gguf_reader]") {
     banc::test::TempDir temp("roots");
     std::filesystem::create_directories(temp.path / "models");

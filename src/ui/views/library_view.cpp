@@ -24,7 +24,8 @@ public:
     bool rescan = false;
     const char* title() const override { return "Bibliothèque"; }
     const char* icon() const override { return ""; }
-    void draw(AppContext& ctx) override {
+    // Indexe les dossiers connus dès la première image, même si cette fenêtre est repliée.
+    void tick(AppContext& ctx) override {
         if (!initialized_) {
             for (const auto& r : ctx.store.list_models()) {
                 ModelInfo m;
@@ -53,7 +54,13 @@ public:
                     else
                         ctx.library.push_back(std::move(m));
                 }
-                ctx.notify("Scan terminé : " + std::to_string(result.models.size()) + " modèles");
+                const auto n = result.models.size();
+                if (n == 0)
+                    ctx.notify("Scan terminé : aucun modèle");
+                else if (n == 1)
+                    ctx.notify("Scan terminé : 1 modèle");
+                else
+                    ctx.notify("Scan terminé : " + std::to_string(n) + " modèles");
                 for (const auto& error : result.errors) ctx.notify(error, true);
             } catch (const std::exception& e) {
                 ctx.notify(e.what(), true);
@@ -79,10 +86,28 @@ public:
             });
             rescan = false;
         }
+    }
+    void draw(AppContext& ctx) override {
         ImGui::InputTextWithHint("##Filtre", "Filtrer les modèles...", filter_.data(), filter_.size());
         ImGui::SameLine();
         if (ImGui::Button("Rescanner")) rescan = true;
         if (scan_.valid()) ImGui::TextDisabled("Scan des modèles en arrière-plan...");
+        if (ctx.library.empty()) {
+            ImGui::TextWrapped(
+                "Aucun modèle dans la bibliothèque. Au démarrage, Banc Local indexe les GGUF des dossiers suivants :");
+            const auto roots = candidate_model_roots();
+            if (roots.empty())
+                ImGui::TextWrapped("Aucun emplacement connu : la variable USERPROFILE est absente.");
+            for (const auto& root : roots) {
+                std::error_code ec;
+                const bool present = std::filesystem::is_directory(root, ec);
+                ImGui::BulletText("%s%s", path_utf8(root).c_str(), present ? "" : " (absent)");
+            }
+            ImGui::TextWrapped(
+                "Déposez vos fichiers .gguf dans le dossier models du profil, ou ajoutez un autre dossier. "
+                "Les blobs Ollama et les modèles LM Studio sont pris en compte lorsqu'ils sont présents. "
+                "Rescanner, ou le menu Fichier, relance la recherche.");
+        }
         if (ImGui::Button("Ajouter un dossier...")) ImGui::OpenPopup("Dossier de modèles");
         if (ImGui::BeginPopup("Dossier de modèles")) {
             ImGui::InputText("Chemin UTF-8", folder_.data(), folder_.size());

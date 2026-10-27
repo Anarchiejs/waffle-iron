@@ -15,9 +15,13 @@ bool is_gguf_file(const std::filesystem::path& path);
 // mais remplit quand même n_params et bytes_by_type. Lève banc::Error si le fichier est illisible.
 ModelInfo read_gguf(const std::filesystem::path& path, bool with_tensors = true);
 
-// Dossiers de modèles par défaut qui existent sur cette machine :
+// Emplacements connus, même s'ils n'existent pas encore :
 // %USERPROFILE%\models, %USERPROFILE%\.ollama\models\blobs, %USERPROFILE%\.lmstudio\models,
-// %USERPROFILE%\.cache\lm-studio\models.
+// %USERPROFILE%\.cache\lm-studio\models, et le dossier blobs de OLLAMA_MODELS s'il est défini
+// (ou OLLAMA_MODELS lui-même s'il n'a pas de sous-dossier blobs).
+std::vector<std::filesystem::path> candidate_model_roots();
+
+// Sous-ensemble de candidate_model_roots() dont le dossier existe sur cette machine.
 std::vector<std::filesystem::path> default_model_roots();
 
 // Parcourt récursivement les dossiers et rend les fichiers GGUF (signature vérifiée),

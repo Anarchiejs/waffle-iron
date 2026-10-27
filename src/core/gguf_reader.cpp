@@ -6,7 +6,6 @@
 #include <cctype>
 #include <type_traits>
 #include <cstring>
-#include <cstdlib>
 #include <fstream>
 #include <limits>
 #include <memory>
@@ -179,18 +178,6 @@ ModelInfo read_gguf(const std::filesystem::path& path, bool with_tensors) {
     } catch (const std::exception& e) {
         throw Error("Lecture GGUF impossible : " + path.string() + " : " + e.what());
     }
-}
-
-std::vector<std::filesystem::path> default_model_roots() {
-    std::vector<std::filesystem::path> result;
-    if (const auto* home = std::getenv("USERPROFILE")) {
-        for (const auto* suffix : {"models", ".ollama/models/blobs", ".lmstudio/models", ".cache/lm-studio/models"}) {
-            auto path = std::filesystem::path(home) / suffix;
-            std::error_code ec;
-            if (std::filesystem::is_directory(path, ec)) result.push_back(path);
-        }
-    }
-    return result;
 }
 
 std::vector<std::filesystem::path> scan_model_dirs(const std::vector<std::filesystem::path>& roots) {

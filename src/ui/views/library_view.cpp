@@ -47,7 +47,11 @@ public:
                 m.n_params = r.n_params;
                 m.context_length = r.context_length;
                 m.n_layer = r.n_layer;
-                if (is_language_model(m)) ctx.library.push_back(std::move(m));
+                // La base peut garder des fiches d'avant : fichier disparu, ou modèle draft d'Ollama.
+                std::error_code ec;
+                const auto blob = find_ollama_blob(m.path);
+                if (is_language_model(m) && std::filesystem::exists(m.path, ec) && (!blob || blob->model))
+                    ctx.library.push_back(std::move(m));
             }
             initialized_ = true;
             rescan = true;

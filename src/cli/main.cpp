@@ -414,6 +414,9 @@ int cmd_list(banc::Store& store, const std::vector<std::string>& args) {
     if (!parser.positionals().empty()) throw banc::Error("banc list n'accepte pas d'argument");
     std::vector<std::vector<std::string>> rows;
     for (const auto& model : store.list_models()) {
+        // Fiche enregistrée avant qu'on reconnaisse les modèles draft d'Ollama : on la masque.
+        if (const auto blob = banc::find_ollama_blob(std::filesystem::u8path(model.path)); blob && !blob->model)
+            continue;
         rows.push_back({model.name, model.file_type, format_bytes(model.file_size), format_count(model.n_params),
                         std::to_string(model.context_length), model.path});
     }

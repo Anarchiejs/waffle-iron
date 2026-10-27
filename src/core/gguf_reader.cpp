@@ -100,6 +100,7 @@ ModelInfo read_gguf(const std::filesystem::path& path, bool with_tensors) {
         model.file_size = std::filesystem::file_size(path);
         model.architecture = string_value(ctx.get(), "general.architecture");
         model.name = string_value(ctx.get(), "general.name", path.stem().string());
+        if (const auto blob = find_ollama_blob(path); blob && blob->model) model.name = blob->tags + " (Ollama)";
         model.file_type = ftype_name(integer(ctx.get(), "general.file_type", UINT32_MAX));
         const auto prefix = model.architecture + ".";
         model.context_length = integer(ctx.get(), prefix + "context_length");
@@ -196,8 +197,10 @@ std::vector<std::filesystem::path> scan_model_dirs(const std::vector<std::filesy
                 const auto split = name.find("-of-");
                 const bool later_shard = split >= 6 && split != std::string::npos && name[split - 6] == '-' &&
                                          name.substr(split - 5, 5) != "00001";
-                if (!name.starts_with("mmproj") && !later_shard && is_gguf_file(path))
-                    result.insert(path.lexically_normal());
+                if (!name.starts_with("mmproj") && !later_shard && is_gguf_file(path)) {
+                    const auto blob = find_ollama_blob(path);
+                    if (!blob || blob->model) result.insert(path.lexically_normal());
+                }
             }
             ec.clear();
             it.increment(ec);

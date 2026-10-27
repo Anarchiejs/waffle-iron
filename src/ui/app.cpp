@@ -27,6 +27,16 @@ void App::frame() {
                (!ctx_.tps_history.empty() && now - ctx_.tps_history.front().first > 600))
             ctx_.tps_history.pop_front();
     }
+    for (auto& v : views_)
+        if (v) {
+            try {
+                v->tick(ctx_);
+            } catch (const std::exception& e) {
+                ctx_.notify(e.what(), true);
+            } catch (...) {
+                ctx_.notify("Erreur inattendue dans la vue", true);
+            }
+        }
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("Fichier")) {
             if (ImGui::MenuItem("Rescanner les modèles")) {

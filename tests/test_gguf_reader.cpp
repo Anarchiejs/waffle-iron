@@ -1,8 +1,47 @@
 #include "core/gguf_reader.hpp"
 #include "test_helpers.hpp"
 #include <gguf.h>
+#include <cstdlib>
 #include <fstream>
 #include <memory>
+
+namespace {
+struct EnvOverride {
+    std::string name;
+    bool had = false;
+    std::string previous;
+    EnvOverride(const char* name, const std::string& value) : name(name) {
+        if (const char* old = std::getenv(name)) {
+            had = true;
+            previous = old;
+        }
+#ifdef _WIN32
+        _putenv_s(name, value.c_str());
+#else
+        setenv(name, value.c_str(), 1);
+#endif
+    }
+    ~EnvOverride() {
+#ifdef _WIN32
+        _putenv_s(name.c_str(), had ? previous.c_str() : "");
+#else
+        if (had)
+            setenv(name.c_str(), previous.c_str(), 1);
+        else
+            unsetenv(name.c_str());
+#endif
+    }
+    EnvOverride(const EnvOverride&) = delete;
+    EnvOverride& operator=(const EnvOverride&) = delete;
+};
+
+bool has_root(const std::vector<std::filesystem::path>& roots, const std::filesystem::path& expected) {
+    const auto wanted = expected.lexically_normal();
+    for (const auto& root : roots)
+        if (root.lexically_normal() == wanted) return true;
+    return false;
+}
+} // namespace
 
 namespace banc::test {
 void write_l1_model(const std::filesystem::path& path) {
@@ -105,6 +144,53 @@ TEST_CASE("GGUF : erreurs et scan récursif filtré", "[gguf_reader]") {
         file << "GGUF";
     }
     CHECK_THROWS_AS(banc::read_gguf(invalid), banc::Error);
+}
+
+TEST_CASE("GGUF : dossiers de modèles par défaut", "[gguf_reader]") {
+    banc::test::TempDir temp("roots");
+    std::filesystem::create_directories(temp.path / "models");
+    std::filesystem::create_directories(temp.path / ".ollama" / "models" / "blobs");
+    std::filesystem::create_directories(temp.path / ".lmstudio" / "models");
+    std::filesystem::create_directories(temp.path / "custom-ollama" / "blobs");
+    EnvOverride profile("USERPROFILE", temp.path.string());
+    EnvOverride ollama("OLLAMA_MODELS", (temp.path / "custom-ollama").string());
+
+    const auto candidates = banc::candidate_model_roots();
+    CHECK(has_root(candidates, temp.path / "models"));
+    CHECK(has_root(candidates, temp.path / ".ollama" / "models" / "blobs"));
+    CHECK(has_root(candidates, temp.path / ".lmstudio" / "models"));
+    CHECK(has_root(candidates, temp.path / ".cache" / "lm-studio" / "models"));
+    CHECK(has_root(candidates, temp.path / "custom-ollama" / "blobs"));
+
+    const auto roots = banc::default_model_roots();
+    CHECK(has_root(roots, temp.path / "models"));
+    CHECK(has_root(roots, temp.path / ".ollama" / "models" / "blobs"));
+    CHECK(has_root(roots, temp.path / ".lmstudio" / "models"));
+    CHECK(has_root(roots, temp.path / "custom-ollama" / "blobs"));
+    CHECK_FALSE(has_root(roots, temp.path / ".cache" / "lm-studio" / "models"));
+    CHECK(roots.size() == 4);
+}
+
+TEST_CASE("GGUF : OLLAMA_MODELS ne duplique pas le dossier par défaut", "[gguf_reader]") {
+    banc::test::TempDir temp("roots_dedup");
+    std::filesystem::create_directories(temp.path / ".ollama" / "models" / "blobs");
+    EnvOverride profile("USERPROFILE", temp.path.string());
+    EnvOverride ollama("OLLAMA_MODELS", (temp.path / ".ollama" / "models").string());
+    const auto roots = banc::default_model_roots();
+    int blobs = 0;
+    for (const auto& root : roots)
+        if (root.lexically_normal() == (temp.path / ".ollama" / "models" / "blobs").lexically_normal()) ++blobs;
+    CHECK(blobs == 1);
+}
+
+TEST_CASE("GGUF : OLLAMA_MODELS sans sous-dossier blobs", "[gguf_reader]") {
+    banc::test::TempDir temp("roots_flat");
+    std::filesystem::create_directories(temp.path / "flat-models");
+    EnvOverride profile("USERPROFILE", temp.path.string());
+    EnvOverride ollama("OLLAMA_MODELS", (temp.path / "flat-models").string());
+    const auto roots = banc::default_model_roots();
+    CHECK(has_root(roots, temp.path / "flat-models"));
+    CHECK_FALSE(has_root(roots, temp.path / "flat-models" / "blobs"));
 }
 
 TEST_CASE("GGUF : modèle réel optionnel", "[gguf_reader]") {

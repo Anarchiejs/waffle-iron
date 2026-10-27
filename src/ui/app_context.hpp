@@ -37,6 +37,9 @@ struct AppContext {
     // Débit de génération en direct, publié par la vue en cours de génération (labo, comparateur).
     std::deque<std::pair<double, double>> tps_history; // (t_seconds, tokens/s)
 
+    // Page demandée par une vue (ex. « Ouvrir dans le planificateur ») ; App l'applique puis remet -1.
+    int requested_page = -1;
+
     std::deque<Toast> toasts;
     void notify(std::string text, bool error = false); // défini dans app.cpp
 

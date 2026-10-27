@@ -1,9 +1,11 @@
 #include "ui/view.hpp"
+#include "ui/theme.hpp"
 #include "ui/widgets.hpp"
 #include "core/gguf_reader.hpp"
 #include <imgui.h>
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cstdio>
 #include <future>
 #include <numeric>
@@ -15,6 +17,10 @@ std::string path_utf8(const std::filesystem::path& path) {
     const auto bytes = path.u8string();
     return {bytes.begin(), bytes.end()};
 }
+std::string lower(std::string s) {
+    for (auto& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
 struct ScanResult {
     std::vector<ModelInfo> models;
     std::vector<std::string> errors;
@@ -23,8 +29,11 @@ class LibraryView final : public View {
 public:
     bool rescan = false;
     const char* title() const override { return "Bibliothèque"; }
+    const char* subtitle() const override {
+        return "Vos modèles GGUF : métadonnées, répartition des poids, étiquettes et notes.";
+    }
     const char* icon() const override { return ""; }
-    // Indexe les dossiers connus dès la première image, même si cette fenêtre est repliée.
+    // Indexe les dossiers connus dès la première image, même si cette page n'est pas affichée.
     void tick(AppContext& ctx) override {
         if (!initialized_) {
             for (const auto& r : ctx.store.list_models()) {
@@ -88,30 +97,58 @@ public:
         }
     }
     void draw(AppContext& ctx) override {
-        ImGui::InputTextWithHint("##Filtre", "Filtrer les modèles...", filter_.data(), filter_.size());
-        ImGui::SameLine();
-        if (ImGui::Button("Rescanner")) rescan = true;
-        if (scan_.valid()) ImGui::TextDisabled("Scan des modèles en arrière-plan...");
-        if (ctx.library.empty()) {
-            ImGui::TextWrapped(
-                "Aucun modèle dans la bibliothèque. Au démarrage, Banc Local indexe les GGUF des dossiers suivants :");
-            const auto roots = candidate_model_roots();
-            if (roots.empty())
-                ImGui::TextWrapped("Aucun emplacement connu : la variable USERPROFILE est absente.");
-            for (const auto& root : roots) {
-                std::error_code ec;
-                const bool present = std::filesystem::is_directory(root, ec);
-                ImGui::BulletText("%s%s", path_utf8(root).c_str(), present ? "" : " (absent)");
-            }
-            ImGui::TextWrapped(
-                "Déposez vos fichiers .gguf dans le dossier models du profil, ou ajoutez un autre dossier. "
-                "Les blobs Ollama et les modèles LM Studio sont pris en compte lorsqu'ils sont présents. "
-                "Rescanner, ou le menu Fichier, relance la recherche.");
+        toolbar(ctx);
+        const ImVec2 avail = ImGui::GetContentRegionAvail();
+        const float gap = em(1);
+        if (avail.x >= em(48)) {
+            // Maître / détail côte à côte, chacun sur toute la hauteur.
+            const float detail_w = std::clamp(avail.x * .34f, em(19), em(27));
+            if (begin_card("##Liste", {avail.x - detail_w - gap, avail.y})) list(ctx);
+            end_card();
+            ImGui::SameLine(0, gap);
+            if (begin_card("##Fiche", {detail_w, avail.y})) detail(ctx);
+            end_card();
+        } else {
+            const float list_h = std::max(em(13), avail.y * .45f);
+            if (begin_card("##Liste", {0, list_h})) list(ctx);
+            end_card();
+            if (begin_card("##Fiche", {0, std::max(em(16), ImGui::GetContentRegionAvail().y)})) detail(ctx);
+            end_card();
         }
-        if (ImGui::Button("Ajouter un dossier...")) ImGui::OpenPopup("Dossier de modèles");
+    }
+
+private:
+    void toolbar(AppContext& ctx) {
+        const auto& style = ImGui::GetStyle();
+        const float add_w = ImGui::CalcTextSize("Ajouter un dossier").x + style.FramePadding.x * 2;
+        const float scan_w = ImGui::CalcTextSize("Scan en cours...").x + style.FramePadding.x * 2;
+        const float avail = ImGui::GetContentRegionAvail().x;
+        const float buttons = add_w + scan_w + style.ItemSpacing.x;
+        ImGui::SetNextItemWidth(std::max(em(10), std::min(em(28), avail - buttons - style.ItemSpacing.x * 2)));
+        ImGui::InputTextWithHint("##Filtre", "Rechercher : nom, fichier, architecture, quantification...",
+                                 filter_.data(), filter_.size());
+        ImGui::SameLine();
+        char count[48];
+        std::snprintf(count, sizeof count, ctx.library.size() == 1 ? "%zu modèle" : "%zu modèles", ctx.library.size());
+        const float right = avail - buttons;
+        if (ImGui::GetCursorPosX() + ImGui::CalcTextSize(count).x + em(1) < right) {
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextDisabled("%s", count);
+            ImGui::SameLine();
+        }
+        ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), right));
+        if (ImGui::Button("Ajouter un dossier", {add_w, 0})) ImGui::OpenPopup("Dossier de modèles");
+        ImGui::SameLine();
+        ImGui::BeginDisabled(scan_.valid());
+        if (primary_button(scan_.valid() ? "Scan en cours..." : "Rescanner", {scan_w, 0})) rescan = true;
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("Ctrl+R");
+        ImGui::SetNextWindowSize({em(30), 0});
         if (ImGui::BeginPopup("Dossier de modèles")) {
-            ImGui::InputText("Chemin UTF-8", folder_.data(), folder_.size());
-            if (ImGui::Button("Ajouter") && folder_[0]) {
+            card_title("Ajouter un dossier de modèles", "Chemin complet d'un dossier contenant des fichiers .gguf.");
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            ImGui::InputTextWithHint("##Chemin", "D:\\Modèles", folder_.data(), folder_.size());
+            if (primary_button("Ajouter et scanner") && folder_[0]) {
                 auto p = std::filesystem::u8path(folder_.data());
                 if (std::filesystem::is_directory(p)) {
                     extra_roots_.push_back(p);
@@ -122,16 +159,56 @@ public:
             }
             ImGui::EndPopup();
         }
+        ImGui::Dummy({0, em(.2f)});
+    }
+    void empty_library() {
+        card_title("Aucun modèle trouvé", "Au démarrage, Banc Local indexe les fichiers .gguf de ces dossiers :");
+        const auto roots = candidate_model_roots();
+        if (roots.empty()) dim_wrapped("Aucun emplacement connu : la variable USERPROFILE est absente.");
+        for (const auto& root : roots) {
+            std::error_code ec;
+            const bool present = std::filesystem::is_directory(root, ec);
+            badge(present ? "présent" : "absent", present ? col::good : col::faint);
+            ImGui::SameLine();
+            push_font(fonts().mono, .88f);
+            ImGui::TextWrapped("%s", path_utf8(root).c_str());
+            ImGui::PopFont();
+        }
+        ImGui::Dummy({0, em(.4f)});
+        dim_wrapped("Déposez vos fichiers .gguf dans le dossier models du profil, ou ajoutez un autre dossier. "
+                    "Les blobs Ollama et les modèles LM Studio sont pris en compte lorsqu'ils sont présents.");
+    }
+    void list(AppContext& ctx) {
+        if (ctx.library.empty()) {
+            if (scan_.valid())
+                empty_state("Recherche des modèles...", "Les dossiers connus sont parcourus en arrière-plan.");
+            else
+                empty_library();
+            return;
+        }
+        const float line = ImGui::GetTextLineHeight();
+        const float row_h = line * 2 + em(.6f);
+        ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, {em(.6f), em(.3f)});
         if (ImGui::BeginTable("Modèles", 6,
-                              ImGuiTableFlags_Sortable | ImGuiTableFlags_Resizable | ImGuiTableFlags_RowBg |
-                                  ImGuiTableFlags_ScrollY,
-                              {0, 240})) {
-            const char* columns[] = {"Nom", "Archi", "Quantif", "Taille", "Paramètres", "Contexte"};
-            // Le nom prend la place libre ; les colonnes numériques gardent leur largeur naturelle.
-            static const float weights[] = {3.0f, 1.4f, 1.0f, 1.0f, 1.0f, 1.0f};
-            for (int i = 0; i < 6; ++i)
-                ImGui::TableSetupColumn(columns[i], ImGuiTableColumnFlags_WidthStretch, weights[i], i);
+                              ImGuiTableFlags_Sortable | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY |
+                                  ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_BordersInnerH |
+                                  ImGuiTableFlags_Hideable,
+                              {0, ImGui::GetContentRegionAvail().y})) {
+            ImGui::TableSetupScrollFreeze(0, 1);
+            ImGui::TableSetupColumn("Modèle", ImGuiTableColumnFlags_WidthStretch | ImGuiTableColumnFlags_NoHide, 0, 0);
+            ImGui::TableSetupColumn("Archi", ImGuiTableColumnFlags_WidthFixed, em(6.5f), 1);
+            ImGui::TableSetupColumn("Quantif", 0, 0, 2);
+            ImGui::TableSetupColumn("Taille", ImGuiTableColumnFlags_PreferSortDescending, 0, 3);
+            ImGui::TableSetupColumn("Paramètres", ImGuiTableColumnFlags_PreferSortDescending, 0, 4);
+            ImGui::TableSetupColumn("Contexte", ImGuiTableColumnFlags_PreferSortDescending, 0, 5);
+            // Table étroite : masquer d'abord les colonnes secondaires pour garder le nom lisible.
+            const float table_w = ImGui::GetContentRegionAvail().x;
+            ImGui::TableSetColumnEnabled(1, table_w >= em(36));
+            ImGui::TableSetColumnEnabled(4, table_w >= em(30));
+            ImGui::TableSetColumnEnabled(5, table_w >= em(25));
+            ImGui::PushStyleColor(ImGuiCol_Text, col::dim);
             ImGui::TableHeadersRow();
+            ImGui::PopStyleColor();
             std::vector<size_t> order(ctx.library.size());
             std::iota(order.begin(), order.end(), 0);
             if (auto* specs = ImGui::TableGetSortSpecs(); specs && specs->SpecsCount) {
@@ -142,7 +219,8 @@ public:
                     int c = 0;
                     switch (sort.ColumnUserID) {
                         case 0:
-                            c = x.name.compare(y.name);
+                            c = model_title(x).compare(model_title(y));
+                            if (c == 0) c = x.file_name.compare(y.file_name);
                             break;
                         case 1:
                             c = x.architecture.compare(y.architecture);
@@ -163,80 +241,169 @@ public:
                     return sort.SortDirection == ImGuiSortDirection_Ascending ? c < 0 : c > 0;
                 });
             }
+            const std::string needle = lower(filter_.data());
+            int shown = 0;
             for (auto i : order) {
                 const auto& m = ctx.library[i];
-                if (filter_[0] &&
-                    (m.name + " " + m.architecture + " " + m.file_type).find(filter_.data()) == std::string::npos)
+                if (!needle.empty() &&
+                    lower(m.name + " " + m.file_name + " " + m.architecture + " " + m.file_type).find(needle) ==
+                        std::string::npos)
                     continue;
+                ++shown;
                 ImGui::PushID(static_cast<int>(i));
-                ImGui::TableNextRow();
+                ImGui::TableNextRow(0, row_h);
                 ImGui::TableNextColumn();
-                if (ImGui::Selectable(m.name.c_str(), ctx.selected_model == static_cast<int>(i),
-                                      ImGuiSelectableFlags_SpanAllColumns))
+                const ImVec2 pos = ImGui::GetCursorScreenPos();
+                const bool selected = ctx.selected_model == static_cast<int>(i);
+                if (ImGui::Selectable("##ligne", selected,
+                                      ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowOverlap,
+                                      {0, row_h - em(.6f)}))
                     ctx.selected_model = static_cast<int>(i);
-                ImGui::TableNextColumn();
+                if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                    ctx.requested_page = 1;
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+                    ImGui::SetTooltip("%s\n%s", model_title(m).c_str(), m.file_name.c_str());
+                // Nom en demi-gras, fichier en dessous ; raccourcis à la largeur de la colonne.
+                const float max_x = pos.x + ImGui::GetColumnWidth();
+                auto* dl = ImGui::GetWindowDrawList();
+                text_ellipsis(dl, fonts().semibold, em(1), pos, max_x, ImGui::GetColorU32(col::text), model_title(m));
+                text_ellipsis(dl, fonts().regular, em(.84f), {pos.x, pos.y + line + 1}, max_x,
+                              ImGui::GetColorU32(col::dim), m.file_name);
+                const float middle = (row_h - em(.6f) - line) * .5f;
+                auto cell = [&] {
+                    ImGui::TableNextColumn();
+                    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + middle);
+                };
+                cell();
                 ImGui::TextUnformatted(m.architecture.c_str());
-                ImGui::TableNextColumn();
-                ImGui::TextUnformatted(m.file_type.c_str());
-                ImGui::TableNextColumn();
+                cell();
+                ImGui::SetCursorPosY(ImGui::GetCursorPosY() - em(.08f));
+                badge(m.file_type.c_str(), col::accent);
+                cell();
                 ImGui::TextUnformatted(format_bytes(m.file_size).c_str());
-                ImGui::TableNextColumn();
+                cell();
                 ImGui::TextUnformatted(format_count(m.n_params).c_str());
-                ImGui::TableNextColumn();
-                ImGui::Text("%u", m.context_length);
+                cell();
+                ImGui::TextUnformatted(format_count(m.context_length).c_str());
                 ImGui::PopID();
+            }
+            if (shown == 0) {
+                ImGui::TableNextRow(0, row_h);
+                ImGui::TableNextColumn();
+                ImGui::SetCursorPosY(ImGui::GetCursorPosY() + em(.6f));
+                ImGui::TextDisabled("Aucun modèle ne correspond à la recherche.");
             }
             ImGui::EndTable();
         }
-        if (const auto* m = ctx.selected()) {
-            section_header(m->name.c_str());
-            ImGui::TextWrapped("%s", path_utf8(m->path).c_str());
-            ImGui::Text("%s · %s · %u couches · contexte %u", m->architecture.c_str(), m->file_type.c_str(), m->n_layer,
-                        m->context_length);
+        ImGui::PopStyleVar();
+    }
+    void detail(AppContext& ctx) {
+        const auto* m = ctx.selected();
+        if (!m) {
+            empty_state("Aucun modèle sélectionné",
+                        "Choisissez un modèle dans la liste pour afficher sa fiche. Un double-clic l'ouvre dans le "
+                        "planificateur de VRAM.");
+            return;
+        }
+        push_font(fonts().semibold, 1.25f);
+        ImGui::TextWrapped("%s", model_title(*m).c_str());
+        ImGui::PopFont();
+        push_font(fonts().mono, .8f);
+        ImGui::PushStyleColor(ImGuiCol_Text, col::dim);
+        ImGui::TextWrapped("%s", path_utf8(m->path).c_str());
+        ImGui::PopStyleColor();
+        ImGui::PopFont();
+        ImGui::Dummy({0, em(.15f)});
+        const float gap = ImGui::GetStyle().ItemSpacing.x;
+        const float half = (ImGui::GetContentRegionAvail().x - gap) * .5f;
+        if (primary_button("Planifier la VRAM", {half, 0})) ctx.requested_page = 1;
+        ImGui::SameLine(0, gap);
+        if (ImGui::Button("Explorer au labo", {half, 0})) ctx.requested_page = 3;
+        ImGui::Dummy({0, em(.25f)});
+        char layers[32];
+        std::snprintf(layers, sizeof layers, "%u", m->n_layer);
+        tile_grid({{"Architecture", m->architecture, "", col::accent},
+                   {"Quantification", m->file_type, "", col::mauve},
+                   {"Taille", format_bytes(m->file_size), "", col::teal},
+                   {"Paramètres", format_count(m->n_params), "", col::amber},
+                   {"Couches", layers, "", col::accent},
+                   {"Contexte max", format_count(m->context_length), "tokens", col::teal}},
+                  em(6.8f));
+        if (!m->bytes_by_type.empty()) {
+            section_header("RÉPARTITION DES POIDS");
             uint64_t total = 0;
             for (const auto& [type, bytes] : m->bytes_by_type) total += bytes;
+            static const ImVec4 colors[] = {col::accent, col::teal, col::mauve, col::amber};
+            int k = 0;
             for (const auto& [type, bytes] : m->bytes_by_type) {
-                auto label = type + " : " + format_bytes(bytes);
-                ImGui::ProgressBar(total ? static_cast<float>(static_cast<double>(bytes) / total) : 0, {-1, 0},
-                                   label.c_str());
+                const float f = total ? static_cast<float>(static_cast<double>(bytes) / total) : 0;
+                ImGui::TextUnformatted(type.c_str());
+                char value[64];
+                std::snprintf(value, sizeof value, "%s  ·  %.0f %%", format_bytes(bytes).c_str(), 100.0 * f);
+                ImGui::SameLine(ImGui::GetContentRegionMax().x - ImGui::CalcTextSize(value).x);
+                ImGui::TextDisabled("%s", value);
+                ImGui::SetCursorPosY(ImGui::GetCursorPosY() - em(.25f));
+                meter(f, colors[k++ % 4]);
             }
-            if (edit_path_ != path_utf8(m->path)) {
-                edit_path_ = path_utf8(m->path);
-                tags_.fill(0);
-                notes_.fill(0);
-                if (auto record = ctx.store.find_model(edit_path_)) {
-                    std::string tags;
-                    for (const auto& t : record->tags) {
-                        if (!tags.empty()) tags += ", ";
-                        tags += t;
-                    }
-                    std::snprintf(tags_.data(), tags_.size(), "%s", tags.c_str());
-                    std::snprintf(notes_.data(), notes_.size(), "%s", record->notes.c_str());
+        }
+        if (edit_path_ != path_utf8(m->path)) {
+            edit_path_ = path_utf8(m->path);
+            tags_.fill(0);
+            notes_.fill(0);
+            if (auto record = ctx.store.find_model(edit_path_)) {
+                std::string tags;
+                for (const auto& t : record->tags) {
+                    if (!tags.empty()) tags += ", ";
+                    tags += t;
                 }
+                std::snprintf(tags_.data(), tags_.size(), "%s", tags.c_str());
+                std::snprintf(notes_.data(), notes_.size(), "%s", record->notes.c_str());
             }
-            ImGui::InputText("Étiquettes (virgules)", tags_.data(), tags_.size());
-            ImGui::InputTextMultiline("Notes", notes_.data(), notes_.size(), {-1, 80});
-            if (ImGui::Button("Enregistrer")) {
-                std::vector<std::string> tags;
-                std::istringstream stream(tags_.data());
-                std::string tag;
-                while (std::getline(stream, tag, ',')) {
-                    auto a = tag.find_first_not_of(" \t");
-                    if (a != std::string::npos) tags.push_back(tag.substr(a, tag.find_last_not_of(" \t") - a + 1));
+        }
+        section_header("ÉTIQUETTES ET NOTES");
+        field_label("Étiquettes", "Séparées par des virgules.");
+        ImGui::InputTextWithHint("##Étiquettes", "chat, rapide, code...", tags_.data(), tags_.size());
+        field_label("Notes");
+        ImGui::InputTextMultiline("##Notes", notes_.data(), notes_.size(), {-FLT_MIN, em(5.5f)});
+        if (primary_button("Enregistrer la fiche")) {
+            std::vector<std::string> tags;
+            std::istringstream stream(tags_.data());
+            std::string tag;
+            while (std::getline(stream, tag, ',')) {
+                auto a = tag.find_first_not_of(" \t");
+                if (a != std::string::npos) tags.push_back(tag.substr(a, tag.find_last_not_of(" \t") - a + 1));
+            }
+            ctx.store.set_model_tags(edit_path_, tags);
+            ctx.store.set_model_notes(edit_path_, notes_.data());
+            ctx.notify("Fiche enregistrée");
+        }
+        ImGui::Dummy({0, em(.2f)});
+        if (!m->metadata.empty() && collapsing("Métadonnées GGUF")) {
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            ImGui::InputTextWithHint("##Clés", "Filtrer les clés...", metadata_filter_.data(), metadata_filter_.size());
+            if (ImGui::BeginTable("Métadonnées", 2,
+                                  ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
+                                      ImGuiTableFlags_SizingStretchProp)) {
+                ImGui::TableSetupColumn("Clé", 0, 1.0f);
+                ImGui::TableSetupColumn("Valeur", 0, 1.3f);
+                const std::string needle = lower(metadata_filter_.data());
+                for (const auto& [key, value] : m->metadata) {
+                    if (!needle.empty() && lower(key).find(needle) == std::string::npos) continue;
+                    ImGui::TableNextRow();
+                    ImGui::TableNextColumn();
+                    push_font(fonts().mono, .8f);
+                    ImGui::PushStyleColor(ImGuiCol_Text, col::dim);
+                    ImGui::TextWrapped("%s", key.c_str());
+                    ImGui::PopStyleColor();
+                    ImGui::PopFont();
+                    ImGui::TableNextColumn();
+                    const std::string shown = value.size() > 400 ? value.substr(0, 400) + "..." : value;
+                    ImGui::TextWrapped("%s", shown.c_str());
                 }
-                ctx.store.set_model_tags(edit_path_, tags);
-                ctx.store.set_model_notes(edit_path_, notes_.data());
-                ctx.notify("Fiche enregistrée");
-            }
-            if (ImGui::CollapsingHeader("Métadonnées")) {
-                ImGui::InputText("Filtre des clés", metadata_filter_.data(), metadata_filter_.size());
-                for (const auto& [key, value] : m->metadata)
-                    if (!metadata_filter_[0] || key.find(metadata_filter_.data()) != std::string::npos)
-                        ImGui::TextWrapped("%s : %s", key.c_str(), value.c_str());
+                ImGui::EndTable();
             }
         }
     }
-private:
     bool initialized_ = false;
     std::future<ScanResult> scan_;
     std::vector<std::filesystem::path> extra_roots_;

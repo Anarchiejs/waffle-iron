@@ -2,8 +2,7 @@
 
 #include "core/vram_planner.hpp"
 #include "ui/app_context.hpp"
-
-#include <imgui.h>
+#include "ui/theme.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -53,21 +52,71 @@ std::string format_duration_ms(double ms) {
     return buf;
 }
 
-bool model_combo(const char* label, AppContext& ctx, int& index) {
-    const char* preview = (index >= 0 && index < static_cast<int>(ctx.library.size()))
-                              ? ctx.library[static_cast<size_t>(index)].name.c_str()
-                              : "(choisir un modèle)";
+float em(float k) {
+    return ImGui::GetFontSize() * k;
+}
+
+void push_font(ImFont* font, float scale) {
+    ImGui::PushFont(font, ImGui::GetStyle().FontSizeBase * scale);
+}
+
+std::string model_title(const ModelInfo& m) {
+    return m.name.empty() ? m.file_name : m.name;
+}
+
+std::string model_details(const ModelInfo& m) {
+    return m.file_name + "  ·  " + m.file_type + "  ·  " + format_bytes(m.file_size);
+}
+
+void text_ellipsis(ImDrawList* dl, ImFont* font, float size, ImVec2 pos, float max_x, ImU32 color,
+                   const std::string& text) {
+    if (!font) font = ImGui::GetFont();
+    auto width = [&](const char* b, const char* e) { return font->CalcTextSizeA(size, FLT_MAX, 0, b, e).x; };
+    const char* begin = text.c_str();
+    const char* end = begin + text.size();
+    if (pos.x + width(begin, end) <= max_x) {
+        dl->AddText(font, size, pos, color, begin, end);
+        return;
+    }
+    static const char ellipsis[] = "…"; // points de suspension (U+2026)
+    const float room = max_x - pos.x - width(ellipsis, ellipsis + 3);
+    while (end > begin && width(begin, end) > room) {
+        --end;
+        while (end > begin && (static_cast<unsigned char>(*end) & 0xC0) == 0x80) --end; // frontière UTF-8
+    }
+    const std::string cut = std::string(begin, end) + ellipsis;
+    dl->AddText(font, size, pos, color, cut.c_str());
+}
+
+bool model_combo(const char* id, AppContext& ctx, int& index, float width) {
+    const bool valid = index >= 0 && index < static_cast<int>(ctx.library.size());
+    std::string preview = "Choisir un modèle...";
+    if (valid) {
+        const auto& m = ctx.library[static_cast<size_t>(index)];
+        preview = model_title(m) + "  ·  " + m.file_type;
+    }
+    ImGui::SetNextItemWidth(width);
     bool changed = false;
-    if (ImGui::BeginCombo(label, preview)) {
+    ImGui::SetNextWindowSizeConstraints({em(24), 0}, {FLT_MAX, em(24)});
+    if (ImGui::BeginCombo(id, preview.c_str(), ImGuiComboFlags_HeightLarge)) {
+        if (ctx.library.empty()) ImGui::TextDisabled("La bibliothèque est vide.");
         for (int i = 0; i < static_cast<int>(ctx.library.size()); ++i) {
             const auto& m = ctx.library[static_cast<size_t>(i)];
             ImGui::PushID(i);
-            std::string item = m.name + "  ·  " + m.file_type + "  ·  " + format_bytes(m.file_size);
-            if (ImGui::Selectable(item.c_str(), i == index)) {
+            const float h = ImGui::GetTextLineHeight() * 2 + ImGui::GetStyle().ItemSpacing.y * .3f;
+            const ImVec2 pos = ImGui::GetCursorScreenPos();
+            if (ImGui::Selectable("##modele", i == index, 0, {0, h})) {
                 index = i;
                 changed = true;
             }
             if (i == index) ImGui::SetItemDefaultFocus();
+            auto* dl = ImGui::GetWindowDrawList();
+            const auto title = model_title(m);
+            const auto details = model_details(m);
+            const float max_x = pos.x + ImGui::GetContentRegionAvail().x;
+            text_ellipsis(dl, nullptr, ImGui::GetFontSize(), pos, max_x, ImGui::GetColorU32(ImGuiCol_Text), title);
+            text_ellipsis(dl, nullptr, ImGui::GetFontSize(), {pos.x, pos.y + ImGui::GetTextLineHeight() + 1}, max_x,
+                          ImGui::GetColorU32(col::dim), details);
             ImGui::PopID();
         }
         ImGui::EndCombo();
@@ -77,9 +126,9 @@ bool model_combo(const char* label, AppContext& ctx, int& index) {
 
 namespace {
 
-bool string_combo(const char* label, std::string& value, const std::vector<std::string>& items) {
+bool string_combo(const char* id, std::string& value, const std::vector<std::string>& items) {
     bool changed = false;
-    if (ImGui::BeginCombo(label, value.c_str())) {
+    if (ImGui::BeginCombo(id, value.c_str())) {
         for (const auto& item : items) {
             if (ImGui::Selectable(item.c_str(), item == value)) {
                 value = item;
@@ -95,12 +144,19 @@ bool string_combo(const char* label, std::string& value, const std::vector<std::
 
 bool load_params_editor(LoadParams& p, int max_layers) {
     bool changed = false;
-    int ngl = p.n_gpu_layers < 0 ? max_layers : std::min(p.n_gpu_layers, max_layers);
-    if (ImGui::SliderInt("Couches sur GPU", &ngl, 0, std::max(max_layers, 1))) {
-        p.n_gpu_layers = ngl >= max_layers ? -1 : ngl;
+    const int top = std::max(max_layers, 1);
+    int ngl = p.n_gpu_layers < 0 ? top : std::min(p.n_gpu_layers, top);
+    field_label("Couches sur GPU",
+                "Nombre de couches du modèle placées en VRAM. Le maximum place tout le modèle sur la carte.");
+    char ngl_label[48];
+    if (ngl >= top)
+        std::snprintf(ngl_label, sizeof ngl_label, "Toutes (%d)", top);
+    else
+        std::snprintf(ngl_label, sizeof ngl_label, "%d / %d", ngl, top);
+    if (ImGui::SliderInt("##ngl", &ngl, 0, top, ngl_label)) {
+        p.n_gpu_layers = ngl >= top ? -1 : ngl;
         changed = true;
     }
-    help_marker("Nombre de couches du modèle placées en VRAM. Le maximum place tout le modèle sur la carte.");
 
     static const int ctx_steps[] = {512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072};
     int ctx_idx = 0;
@@ -108,70 +164,269 @@ bool load_params_editor(LoadParams& p, int max_layers) {
         if (static_cast<uint32_t>(ctx_steps[i]) <= p.n_ctx) ctx_idx = i;
     char ctx_label[32];
     std::snprintf(ctx_label, sizeof ctx_label, "%u tokens", p.n_ctx);
-    if (ImGui::SliderInt("Contexte", &ctx_idx, 0, IM_ARRAYSIZE(ctx_steps) - 1, ctx_label)) {
+    field_label("Contexte");
+    if (ImGui::SliderInt("##ctx", &ctx_idx, 0, IM_ARRAYSIZE(ctx_steps) - 1, ctx_label)) {
         p.n_ctx = static_cast<uint32_t>(ctx_steps[ctx_idx]);
         changed = true;
     }
 
-    changed |= string_combo("Cache K", p.type_k, kv_cache_types());
-    changed |= string_combo("Cache V", p.type_v, kv_cache_types());
-    help_marker(
-        "Quantifier le cache KV (q8_0, q4_0) divise sa taille ; un cache V quantifié exige la flash attention.");
-
-    const char* fa_items[] = {"Auto", "Non", "Oui"};
-    int fa = p.flash_attn + 1;
-    if (ImGui::Combo("Flash attention", &fa, fa_items, IM_ARRAYSIZE(fa_items))) {
-        p.flash_attn = fa - 1;
-        changed = true;
-    }
-
-    changed |= ImGui::Checkbox("Cache SWA complet", &p.swa_full);
+    field_pair(
+        [&](float w) {
+            field_label("Cache K", nullptr, w);
+            changed |= string_combo("##k", p.type_k, kv_cache_types());
+        },
+        [&](float w) {
+            field_label("Cache V",
+                        "Quantifier le cache KV (q8_0, q4_0) divise sa taille ; un cache V quantifié exige la flash "
+                        "attention.",
+                        w);
+            changed |= string_combo("##v", p.type_v, kv_cache_types());
+        });
+    field_pair(
+        [&](float w) {
+            field_label("Flash attention", nullptr, w);
+            const char* fa_items[] = {"Auto", "Non", "Oui"};
+            int fa = p.flash_attn + 1;
+            if (ImGui::Combo("##fa", &fa, fa_items, IM_ARRAYSIZE(fa_items))) {
+                p.flash_attn = fa - 1;
+                changed = true;
+            }
+        },
+        [&](float w) {
+            static const int ub_steps[] = {64, 128, 256, 512, 1024, 2048};
+            int ub_idx = 3;
+            for (int i = 0; i < IM_ARRAYSIZE(ub_steps); ++i)
+                if (static_cast<uint32_t>(ub_steps[i]) == p.n_ubatch) ub_idx = i;
+            char ub_label[16];
+            std::snprintf(ub_label, sizeof ub_label, "%u", p.n_ubatch);
+            field_label("Micro-lot (ubatch)", nullptr, w);
+            if (ImGui::SliderInt("##ub", &ub_idx, 0, IM_ARRAYSIZE(ub_steps) - 1, ub_label)) {
+                p.n_ubatch = static_cast<uint32_t>(ub_steps[ub_idx]);
+                changed = true;
+            }
+        });
+    changed |= checkbox("Cache SWA complet", &p.swa_full);
     help_marker("Modèles à fenêtre glissante (Gemma...) : par défaut llama.cpp alloue le cache de ces couches sur "
                 "tout le contexte. Décoché, il se limite à la fenêtre : beaucoup moins de VRAM en contexte long.");
-
-    static const int ub_steps[] = {64, 128, 256, 512, 1024, 2048};
-    int ub_idx = 3;
-    for (int i = 0; i < IM_ARRAYSIZE(ub_steps); ++i)
-        if (static_cast<uint32_t>(ub_steps[i]) == p.n_ubatch) ub_idx = i;
-    char ub_label[16];
-    std::snprintf(ub_label, sizeof ub_label, "%u", p.n_ubatch);
-    if (ImGui::SliderInt("Micro-lot (ubatch)", &ub_idx, 0, IM_ARRAYSIZE(ub_steps) - 1, ub_label)) {
-        p.n_ubatch = static_cast<uint32_t>(ub_steps[ub_idx]);
-        changed = true;
-    }
     return changed;
 }
 
 bool busy_indicator(const char* label, float fraction) {
-    if (fraction >= 0.0f) {
-        ImGui::ProgressBar(fraction, ImVec2(-90.0f, 0.0f), label);
-    } else {
+    const float button = ImGui::CalcTextSize("Annuler").x + ImGui::GetStyle().FramePadding.x * 2;
+    if (fraction < 0.0f) {
         // Barre indéterminée : un segment qui va et vient.
         const float t = static_cast<float>(ImGui::GetTime());
-        const float phase = 0.5f + 0.5f * std::sin(t * 3.0f);
-        ImGui::ProgressBar(phase, ImVec2(-90.0f, 0.0f), label);
+        fraction = 0.5f + 0.5f * std::sin(t * 3.0f);
     }
+    ImGui::ProgressBar(std::clamp(fraction, 0.0f, 1.0f),
+                       ImVec2(-(button + ImGui::GetStyle().ItemSpacing.x), 0.0f), label);
     ImGui::SameLine();
-    return ImGui::Button("Annuler", ImVec2(80.0f, 0.0f));
+    return ImGui::Button("Annuler", ImVec2(button, 0.0f));
+}
+
+bool begin_card(const char* id, ImVec2 size, ImGuiWindowFlags flags) {
+    ImGuiChildFlags child = ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding;
+    if (size.y == 0) {
+        child |= ImGuiChildFlags_AutoResizeY;
+        flags |= ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
+    }
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, col::card);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {em(1.1f), em(.95f)});
+    const bool open = ImGui::BeginChild(id, size, child, flags);
+    ImGui::PopStyleVar();
+    ImGui::PopStyleColor();
+    return open;
+}
+
+void end_card() {
+    ImGui::EndChild();
+}
+
+void card_title(const char* title, const char* subtitle) {
+    push_font(fonts().semibold, 1.06f);
+    ImGui::TextUnformatted(title);
+    ImGui::PopFont();
+    if (subtitle) {
+        ImGui::SetCursorPosY(ImGui::GetCursorPosY() - em(.3f));
+        dim_wrapped(subtitle);
+    }
+    ImGui::Dummy({0, em(.15f)});
 }
 
 void section_header(const char* text) {
-    ImGui::Spacing();
-    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+    ImGui::Dummy({0, em(.2f)});
+    push_font(fonts().semibold, .82f);
+    ImGui::PushStyleColor(ImGuiCol_Text, col::dim);
     ImGui::TextUnformatted(text);
     ImGui::PopStyleColor();
-    ImGui::Separator();
+    ImGui::PopFont();
+}
+
+void field_label(const char* text, const char* help, float width) {
+    push_font(nullptr, .9f);
+    ImGui::PushStyleColor(ImGuiCol_Text, col::dim);
+    ImGui::TextUnformatted(text);
+    ImGui::PopStyleColor();
+    ImGui::PopFont();
+    if (help) help_marker(help);
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY() - ImGui::GetStyle().ItemSpacing.y * .55f);
+    ImGui::SetNextItemWidth(width);
+}
+
+void field_pair(const std::function<void(float)>& left, const std::function<void(float)>& right) {
+    const float avail = ImGui::GetContentRegionAvail().x;
+    const float gap = ImGui::GetStyle().ItemSpacing.x;
+    if (avail < em(15)) {
+        left(avail);
+        right(avail);
+        return;
+    }
+    // Positions explicites plutôt que SameLine : SameLine reprendrait la ligne de base du cadre de gauche et
+    // décalerait le libellé de droite vers le bas.
+    const float w = std::floor((avail - gap) * .5f);
+    const ImVec2 start = ImGui::GetCursorPos();
+    ImGui::BeginGroup();
+    left(w);
+    ImGui::EndGroup();
+    const float bottom_left = ImGui::GetCursorPosY();
+    ImGui::SetCursorPos({start.x + w + gap, start.y});
+    ImGui::BeginGroup();
+    right(w);
+    ImGui::EndGroup();
+    const float bottom = std::max(bottom_left, ImGui::GetCursorPosY());
+    ImGui::SetCursorPos({start.x, bottom});
+}
+
+bool checkbox(const char* label, bool* value) {
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, {em(.22f), em(.22f)});
+    const bool changed = ImGui::Checkbox(label, value);
+    ImGui::PopStyleVar();
+    return changed;
+}
+
+bool collapsing(const char* label, ImGuiTreeNodeFlags flags) {
+    ImGui::PushStyleColor(ImGuiCol_Header, col::card_hi);
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(.165f, .180f, .225f, 1));
+    ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(.20f, .22f, .28f, 1));
+    const bool open = ImGui::CollapsingHeader(label, flags);
+    ImGui::PopStyleColor(3);
+    return open;
 }
 
 void help_marker(const char* text) {
-    ImGui::SameLine();
-    ImGui::TextDisabled("(?)");
+    ImGui::SameLine(0, em(.35f));
+    ImGui::PushStyleColor(ImGuiCol_Text, col::faint);
+    push_font(nullptr, .9f);
+    ImGui::TextUnformatted("(?)");
+    ImGui::PopFont();
+    ImGui::PopStyleColor();
     if (ImGui::BeginItemTooltip()) {
-        ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30.0f);
+        ImGui::PushTextWrapPos(em(28));
         ImGui::TextUnformatted(text);
         ImGui::PopTextWrapPos();
         ImGui::EndTooltip();
     }
+}
+
+void dim_wrapped(const char* text) {
+    ImGui::PushStyleColor(ImGuiCol_Text, col::dim);
+    ImGui::TextWrapped("%s", text);
+    ImGui::PopStyleColor();
+}
+
+bool primary_button(const char* label, ImVec2 size) {
+    ImGui::PushStyleColor(ImGuiCol_Button, col::accent_bg);
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.34f, 0.37f, 0.68f, 1));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.39f, 0.43f, 0.76f, 1));
+    const bool clicked = ImGui::Button(label, size);
+    ImGui::PopStyleColor(3);
+    return clicked;
+}
+
+void badge(const char* text, const ImVec4& color) {
+    const ImVec2 size = ImGui::CalcTextSize(text);
+    const ImVec2 pad{em(.45f), em(.08f)};
+    const ImVec2 pos = ImGui::GetCursorScreenPos();
+    auto* dl = ImGui::GetWindowDrawList();
+    dl->AddRectFilled(pos, {pos.x + size.x + pad.x * 2, pos.y + size.y + pad.y * 2},
+                      ImGui::GetColorU32(ImVec4(color.x, color.y, color.z, .16f)), em(.35f));
+    dl->AddText({pos.x + pad.x, pos.y + pad.y}, ImGui::GetColorU32(color), text);
+    ImGui::Dummy({size.x + pad.x * 2, size.y + pad.y * 2});
+}
+
+void meter(float fraction, const ImVec4& color, float width, float height) {
+    if (width < 0) width = ImGui::GetContentRegionAvail().x;
+    if (height <= 0) height = em(.42f);
+    const ImVec2 pos = ImGui::GetCursorScreenPos();
+    auto* dl = ImGui::GetWindowDrawList();
+    const float r = height * .5f;
+    dl->AddRectFilled(pos, {pos.x + width, pos.y + height}, ImGui::GetColorU32(ImVec4(1, 1, 1, .07f)), r);
+    const float f = std::clamp(fraction, 0.0f, 1.0f);
+    if (f > 0) dl->AddRectFilled(pos, {pos.x + std::max(height, width * f), pos.y + height}, ImGui::GetColorU32(color), r);
+    ImGui::Dummy({width, height});
+}
+
+void empty_state(const char* title, const char* text) {
+    const ImVec2 avail = ImGui::GetContentRegionAvail();
+    const float width = std::min(avail.x, em(26));
+    const float x = ImGui::GetCursorPosX() + (avail.x - width) * .5f;
+    const float block = em(4.5f);
+    if (avail.y > block) ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (avail.y - block) * .4f);
+    push_font(fonts().semibold, 1.15f);
+    const float tw = ImGui::CalcTextSize(title).x;
+    ImGui::SetCursorPosX(x + std::max(0.0f, (width - tw) * .5f));
+    ImGui::TextUnformatted(title);
+    ImGui::PopFont();
+    ImGui::SetCursorPosX(x);
+    ImGui::PushTextWrapPos(x + width);
+    ImGui::PushStyleColor(ImGuiCol_Text, col::dim);
+    // Centrage ligne à ligne d'un texte court : une seule ligne si elle tient, sinon paragraphe aligné.
+    const float lw = ImGui::CalcTextSize(text).x;
+    if (lw < width) ImGui::SetCursorPosX(x + (width - lw) * .5f);
+    ImGui::TextWrapped("%s", text);
+    ImGui::PopStyleColor();
+    ImGui::PopTextWrapPos();
+}
+
+void tile_grid(const std::vector<Tile>& tiles, float min_width) {
+    if (tiles.empty()) return;
+    const float avail = ImGui::GetContentRegionAvail().x;
+    const float gap = ImGui::GetStyle().ItemSpacing.x;
+    int cols = std::max(1, static_cast<int>((avail + gap) / (min_width + gap)));
+    cols = std::min(cols, static_cast<int>(tiles.size()));
+    // Rangées équilibrées : 6 tuiles sur 4 colonnes donnent 3 + 3 plutôt que 4 + 2.
+    const int rows = (static_cast<int>(tiles.size()) + cols - 1) / cols;
+    cols = (static_cast<int>(tiles.size()) + rows - 1) / rows;
+    const float w = std::floor((avail - gap * static_cast<float>(cols - 1)) / static_cast<float>(cols));
+    const float h = em(3.9f);
+    auto* dl = ImGui::GetWindowDrawList();
+    for (size_t i = 0; i < tiles.size(); ++i) {
+        const auto& t = tiles[i];
+        if (i % static_cast<size_t>(cols)) ImGui::SameLine(0, gap);
+        const ImVec2 pos = ImGui::GetCursorScreenPos();
+        dl->AddRectFilled(pos, {pos.x + w, pos.y + h}, ImGui::GetColorU32(col::card_hi), em(.55f));
+        dl->AddRectFilled({pos.x, pos.y + em(.7f)}, {pos.x + em(.18f), pos.y + h - em(.7f)},
+                          ImGui::GetColorU32(t.accent), em(.1f));
+        const float px = pos.x + em(.85f);
+        const float clip = pos.x + w - em(.4f);
+        const ImVec4 clip_rect{pos.x, pos.y, clip, pos.y + h};
+        dl->AddText(fonts().semibold, em(.82f), {px, pos.y + em(.55f)}, ImGui::GetColorU32(col::dim), t.label.c_str(),
+                    nullptr, 0, &clip_rect);
+        dl->AddText(fonts().semibold, em(1.32f), {px, pos.y + em(1.45f)}, ImGui::GetColorU32(col::text),
+                    t.value.c_str(), nullptr, 0, &clip_rect);
+        if (!t.sub.empty()) {
+            const float vw = fonts().semibold->CalcTextSizeA(em(1.32f), FLT_MAX, 0, t.value.c_str()).x;
+            dl->AddText(nullptr, em(.85f), {px + vw + em(.45f), pos.y + em(1.85f)}, ImGui::GetColorU32(col::dim),
+                        t.sub.c_str(), nullptr, 0, &clip_rect);
+        }
+        ImGui::Dummy({w, h});
+        if (ImGui::IsItemHovered() && !t.sub.empty())
+            ImGui::SetTooltip("%s : %s %s", t.label.c_str(), t.value.c_str(), t.sub.c_str());
+    }
+}
+
+float side_width(float ratio, float min_em, float max_em) {
+    return std::clamp(ImGui::GetContentRegionAvail().x * ratio, em(min_em), em(max_em));
 }
 
 } // namespace banc::ui

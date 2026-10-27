@@ -1,10 +1,12 @@
 #include "ui/view.hpp"
+#include "ui/theme.hpp"
 #include "ui/widgets.hpp"
 #include "core/gguf_reader.hpp"
 #include "core/vram_planner.hpp"
 #include <imgui.h>
 #include <implot.h>
 #include <algorithm>
+#include <cstdio>
 #include <future>
 #include <map>
 #include <ctime>
@@ -23,6 +25,9 @@ std::string config_label(const LoadParams& p) {
     return "ngl=" + std::to_string(p.n_gpu_layers) + " ctx=" + std::to_string(p.n_ctx) + " kv=" + p.type_k + "/" +
            p.type_v + " fa=" + std::to_string(p.flash_attn);
 }
+std::string signed_bytes(int64_t v) {
+    return (v < 0 ? "−" : "+") + format_bytes(static_cast<uint64_t>(v < 0 ? -v : v));
+}
 class VramView final : public View {
     LoadParams params_;
     std::map<std::filesystem::path, ModelInfo> cache_;
@@ -32,11 +37,232 @@ class VramView final : public View {
     std::string history_path_;
     std::vector<VramCheck> history_;
     std::optional<VramCheck> last_check_;
+
+    // Colonne de gauche : modèle et réglages simulés. Rend le modèle lu (tenseurs) ou nullptr.
+    const ModelInfo* config(AppContext& ctx, const VramEstimate* estimate, const std::optional<GpuSample>& sample) {
+        card_title("Configuration", "Réglages de chargement simulés.");
+        field_label("Modèle");
+        model_combo("##modele", ctx, ctx.selected_model);
+        const auto* selected = ctx.selected();
+        if (!selected) {
+            ImGui::Dummy({0, em(.2f)});
+            dim_wrapped("Choisissez un modèle ici ou dans la bibliothèque.");
+            return nullptr;
+        }
+        const auto path = selected->path;
+        if (!cache_.contains(path)) {
+            ImGui::Dummy({0, em(.2f)});
+            if (path == failed_) {
+                dim_wrapped("La lecture des tenseurs a échoué.");
+                if (ImGui::Button("Réessayer la lecture GGUF", {-FLT_MIN, 0})) failed_.clear();
+            } else
+                busy_indicator("Lecture des tenseurs...");
+            return nullptr;
+        }
+        const auto& model = cache_.at(path);
+        params_.model_path = path;
+        load_params_editor(params_, static_cast<int>(model.n_layer));
+        if (!estimate) return &model;
+
+        ImGui::Dummy({0, em(.2f)});
+        ImGui::Separator();
+        ImGui::Dummy({0, em(.1f)});
+        const uint64_t capacity = sample ? sample->vram_total : 0;
+        const uint64_t used = sample ? sample->vram_used : 0;
+        ImGui::BeginDisabled(!sample);
+        if (ImGui::Button("Couches max qui tiennent", {-FLT_MIN, 0}))
+            params_.n_gpu_layers =
+                max_gpu_layers_for(model, plan_input(params_), capacity > used ? capacity - used : 0);
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip("Plus grand nombre de couches dont l'estimation tient dans la VRAM libre actuelle.");
+        ImGui::BeginDisabled(checking_.valid() || ctx.engine.state() != EngineState::Idle || !sample);
+        if (primary_button("Vérifier réellement", {-FLT_MIN, 0})) start_check(ctx, estimate->total_gpu());
+        ImGui::EndDisabled();
+        if (checking_.valid() && busy_indicator("Vérification...")) ctx.engine.cancel_all();
+        ImGui::Dummy({0, em(.1f)});
+        push_font(nullptr, .88f);
+        dim_wrapped("La vérification décharge le modèle courant, mesure un chargement isolé puis le décharge.");
+#ifndef BANC_HAS_CUDA
+        dim_wrapped("Build CPU : le chargement utilise le CPU ; la mesure ne valide pas une estimation CUDA.");
+#endif
+        if (!sample) dim_wrapped("NVML indisponible : capacité et vérification réelle inconnues.");
+        ImGui::PopFont();
+        return &model;
+    }
+    void start_check(AppContext& ctx, uint64_t estimated) {
+        auto* telemetry = &ctx.telemetry;
+        auto* store = &ctx.store;
+        const auto params = params_;
+        checking_ = ctx.engine.submit([telemetry, store, params, estimated](EngineSession& session) {
+            session.unload();
+            // Laisser NVML observer la libération avant de prendre la référence.
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            auto before = telemetry->sample();
+            if (!before) throw Error("Mesure NVML indisponible avant chargement");
+            try {
+                session.load(params);
+                std::this_thread::sleep_for(std::chrono::milliseconds(200));
+                auto after = telemetry->sample();
+                if (!after) throw Error("Mesure NVML indisponible après chargement");
+                VramCheck result;
+                result.model_path = path_utf8(params.model_path);
+                result.config = config_label(params);
+                result.estimated_gpu = estimated;
+                result.measured_gpu = after->vram_used > before->vram_used ? after->vram_used - before->vram_used : 0;
+                const auto now = std::time(nullptr);
+                std::tm utc{};
+                gmtime_s(&utc, &now);
+                char date[32];
+                std::strftime(date, sizeof date, "%Y-%m-%dT%H:%M:%SZ", &utc);
+                result.timestamp = date;
+                session.unload();
+                store->save_vram_check(result);
+                return result;
+            } catch (...) {
+                session.unload();
+                throw;
+            }
+        });
+    }
+    void results(AppContext& ctx, const ModelInfo& model, const VramEstimate& estimate,
+                 const std::optional<GpuSample>& sample) {
+        const uint64_t capacity = sample ? sample->vram_total : 0;
+        const uint64_t used = sample ? sample->vram_used : 0;
+        const uint64_t free = capacity > used ? capacity - used : 0;
+        std::vector<Tile> tiles = {{"Estimation GPU", format_bytes(estimate.total_gpu()), "", col::accent},
+                                   {"Hors GPU (RAM)", format_bytes(estimate.total_cpu()), "", col::teal}};
+        if (sample) {
+            const int64_t margin = static_cast<int64_t>(free) - static_cast<int64_t>(estimate.total_gpu());
+            tiles.push_back({"VRAM libre", format_bytes(free), "/ " + format_bytes(capacity), col::mauve});
+            tiles.push_back({"Marge", signed_bytes(margin), margin >= 0 ? "ça tient" : "dépassement",
+                             margin >= 0 ? col::good : col::bad});
+        }
+        tile_grid(tiles, em(7.5f));
+        ImGui::Dummy({0, em(.1f)});
+
+        const float chart_h = std::clamp(ImGui::GetContentRegionAvail().y * .5f, em(15), em(24));
+        if (begin_card("##Répartition", {0, chart_h}, ImGuiWindowFlags_NoScrollbar)) {
+            card_title("Répartition mémoire");
+            ImPlot::PushStyleVar(ImPlotStyleVar_PlotPadding, ImVec2(0, em(.3f)));
+            if (ImPlot::BeginPlot("##Répartition", {-1, ImGui::GetContentRegionAvail().y},
+                                  ImPlotFlags_NoTitle | ImPlotFlags_NoMenus | ImPlotFlags_NoBoxSelect)) {
+                ImPlot::SetupAxis(ImAxis_X1, nullptr, ImPlotAxisFlags_NoHighlight);
+                ImPlot::SetupAxis(ImAxis_Y1, nullptr, ImPlotAxisFlags_NoHighlight);
+                ImPlot::SetupAxisFormat(ImAxis_Y1, "%.1f Go");
+                ImPlot::SetupLegend(ImPlotLocation_North,
+                                    ImPlotLegendFlags_Outside | ImPlotLegendFlags_Horizontal | ImPlotLegendFlags_NoButtons);
+                ImPlot::SetupAxisLimits(ImAxis_X1, -.6, 1.6, ImPlotCond_Always);
+                const double ymax =
+                    static_cast<double>(std::max({estimate.total_gpu() + used, estimate.total_cpu(), capacity})) / GiB;
+                ImPlot::SetupAxisLimits(ImAxis_Y1, 0, std::max(1.0, ymax * 1.12), ImPlotCond_Always);
+                const double ticks[] = {0, 1};
+                const char* labels[] = {"GPU", "CPU"};
+                ImPlot::SetupAxisTicks(ImAxis_X1, ticks, 2, labels);
+                const char* components[] = {"Poids", "Cache KV", "Tampons", "Overhead"};
+                const double data[] = {
+                    static_cast<double>(estimate.weights_gpu) / GiB,  static_cast<double>(estimate.weights_cpu) / GiB,
+                    static_cast<double>(estimate.kv_cache_gpu) / GiB, static_cast<double>(estimate.kv_cache_cpu) / GiB,
+                    static_cast<double>(estimate.compute_gpu) / GiB,  static_cast<double>(estimate.compute_cpu) / GiB,
+                    static_cast<double>(estimate.overhead_gpu) / GiB, 0};
+                ImPlotSpec stacked;
+                stacked.Flags = ImPlotBarGroupsFlags_Stacked;
+                ImPlot::PlotBarGroups(components, data, 4, 2, .55, 0, stacked);
+                // Seuils horizontaux tracés en segments pleine largeur (plus lisibles que des lignes infinies).
+                const double span[] = {-.6, 1.6};
+                ImPlotSpec limit_line;
+                limit_line.LineWeight = 2;
+                if (capacity) {
+                    const double limit = static_cast<double>(capacity) / GiB;
+                    const double ys[] = {limit, limit};
+                    limit_line.LineColor = col::bad;
+                    ImPlot::PlotLine("VRAM totale", span, ys, 2, limit_line);
+                }
+                if (sample) {
+                    const double occupied = static_cast<double>(used) / GiB;
+                    const double ys[] = {occupied, occupied};
+                    limit_line.LineColor = col::dim;
+                    ImPlot::PlotLine("Déjà occupée", span, ys, 2, limit_line);
+                }
+                ImPlot::EndPlot();
+            }
+            ImPlot::PopStyleVar();
+        }
+        end_card();
+
+        if (!estimate.notes.empty()) {
+            if (begin_card("##Notes")) {
+                card_title("Remarques du planificateur");
+                for (const auto& note : estimate.notes) {
+                    ImGui::Bullet();
+                    ImGui::SameLine();
+                    ImGui::TextWrapped("%s", note.c_str());
+                }
+            }
+            end_card();
+        }
+
+        const auto path = path_utf8(model.path);
+        if (history_path_ != path) {
+            history_ = ctx.store.vram_checks(path);
+            history_path_ = path;
+        }
+        if (begin_card("##Vérifications")) {
+            card_title("Vérifications réelles",
+                       "Mesure NVML globale : les autres processus peuvent influencer le résultat.");
+            if (last_check_ && last_check_->model_path == path) {
+                const auto& check = *last_check_;
+                char gap[32] = "—";
+                if (check.estimated_gpu)
+                    std::snprintf(gap, sizeof gap, "%+.1f %%",
+                                  100 * (static_cast<double>(check.measured_gpu) / check.estimated_gpu - 1));
+                tile_grid({{"Dernière mesure", format_bytes(check.measured_gpu), "", col::teal},
+                           {"Écart mesure / estimation", gap, "", col::amber}},
+                          em(11));
+            }
+            if (history_.empty())
+                dim_wrapped("Aucune vérification enregistrée pour ce modèle.");
+            else if (ImGui::BeginTable("historique", 5,
+                                       ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
+                                           ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_ScrollX)) {
+                ImGui::TableSetupColumn("Date (UTC)", 0, 1.2f);
+                ImGui::TableSetupColumn("Configuration", 0, 2.4f);
+                ImGui::TableSetupColumn("Estimé", 0, .8f);
+                ImGui::TableSetupColumn("Mesuré", 0, .8f);
+                ImGui::TableSetupColumn("Écart", 0, .6f);
+                ImGui::PushStyleColor(ImGuiCol_Text, col::dim);
+                ImGui::TableHeadersRow();
+                ImGui::PopStyleColor();
+                for (const auto& check : history_) {
+                    ImGui::TableNextRow();
+                    ImGui::TableNextColumn();
+                    ImGui::TextUnformatted(check.timestamp.c_str());
+                    ImGui::TableNextColumn();
+                    push_font(fonts().mono, .85f);
+                    ImGui::TextWrapped("%s", check.config.c_str());
+                    ImGui::PopFont();
+                    ImGui::TableNextColumn();
+                    ImGui::TextUnformatted(format_bytes(check.estimated_gpu).c_str());
+                    ImGui::TableNextColumn();
+                    ImGui::TextUnformatted(format_bytes(check.measured_gpu).c_str());
+                    ImGui::TableNextColumn();
+                    if (check.estimated_gpu)
+                        ImGui::Text("%+.1f %%", 100 * (static_cast<double>(check.measured_gpu) / check.estimated_gpu - 1));
+                }
+                ImGui::EndTable();
+            }
+        }
+        end_card();
+    }
+
 public:
     ~VramView() override {
         if (checking_.valid()) checking_.wait();
     }
     const char* title() const override { return "Planificateur de VRAM"; }
+    const char* subtitle() const override {
+        return "Estimez la mémoire d'un chargement avant de le lancer, puis vérifiez-la par une mesure réelle.";
+    }
     const char* icon() const override { return ""; }
     void draw(AppContext& ctx) override {
         if (is_ready(reading_)) {
@@ -58,132 +284,46 @@ public:
                 ctx.notify(e.what(), true);
             }
         }
-        model_combo("Modèle", ctx, ctx.selected_model);
-        const auto* selected = ctx.selected();
-        if (!selected) {
-            ImGui::TextDisabled("Sélectionnez un modèle dans la bibliothèque.");
-            return;
+        // Lecture complète (tenseurs) du modèle choisi, en arrière-plan.
+        const ModelInfo* model = nullptr;
+        if (const auto* selected = ctx.selected()) {
+            const auto path = selected->path;
+            if (!cache_.contains(path) && !reading_.valid() && path != failed_) {
+                requested_ = path;
+                reading_ = std::async(std::launch::async, [path] { return read_gguf(path, true); });
+            }
+            if (cache_.contains(path)) model = &cache_.at(path);
         }
-        const auto path = selected->path;
-        if (!cache_.contains(path) && !reading_.valid() && path != failed_) {
-            requested_ = path;
-            reading_ = std::async(std::launch::async, [path] { return read_gguf(path, true); });
+        std::optional<VramEstimate> estimate;
+        if (model) {
+            params_.model_path = model->path;
+            estimate = estimate_vram(*model, plan_input(params_));
         }
-        if (!cache_.contains(path)) {
-            if (path == failed_) {
-                if (ImGui::Button("Réessayer la lecture GGUF")) failed_.clear();
-            } else
-                ImGui::TextDisabled("Lecture des tenseurs en arrière-plan...");
-            return;
-        }
-        const auto& model = cache_.at(path);
-        params_.model_path = path;
-        load_params_editor(params_, static_cast<int>(model.n_layer));
-        const auto estimate = estimate_vram(model, plan_input(params_));
         const auto sample = ctx.telemetry.sample();
-        const uint64_t capacity = sample ? sample->vram_total : 0;
-        const uint64_t used = sample ? sample->vram_used : 0;
-        ImGui::Text("Estimation GPU : %s   |   CPU : %s", format_bytes(estimate.total_gpu()).c_str(),
-                    format_bytes(estimate.total_cpu()).c_str());
-        if (ImPlot::BeginPlot("Répartition mémoire", {-1, 280})) {
-            ImPlot::SetupAxes("Placement", "Go");
-            ImPlot::SetupAxisLimits(ImAxis_X1, -.6, 1.6, ImPlotCond_Always);
-            const double ymax =
-                static_cast<double>(std::max({estimate.total_gpu() + used, estimate.total_cpu(), capacity})) / GiB;
-            ImPlot::SetupAxisLimits(ImAxis_Y1, 0, std::max(1.0, ymax * 1.15), ImPlotCond_Always);
-            const double ticks[] = {0, 1};
-            const char* labels[] = {"GPU", "CPU"};
-            ImPlot::SetupAxisTicks(ImAxis_X1, ticks, 2, labels);
-            const char* components[] = {"Poids", "Cache KV", "Tampons", "Overhead"};
-            const double data[] = {
-                static_cast<double>(estimate.weights_gpu) / GiB,  static_cast<double>(estimate.weights_cpu) / GiB,
-                static_cast<double>(estimate.kv_cache_gpu) / GiB, static_cast<double>(estimate.kv_cache_cpu) / GiB,
-                static_cast<double>(estimate.compute_gpu) / GiB,  static_cast<double>(estimate.compute_cpu) / GiB,
-                static_cast<double>(estimate.overhead_gpu) / GiB, 0};
-            ImPlotSpec stacked;
-            stacked.Flags = ImPlotBarGroupsFlags_Stacked;
-            ImPlot::PlotBarGroups(components, data, 4, 2, .65, 0, stacked);
-            ImPlotSpec horizontal;
-            horizontal.Flags = ImPlotInfLinesFlags_Horizontal;
-            if (capacity) {
-                const double limit = static_cast<double>(capacity) / GiB;
-                ImPlot::PlotInfLines("VRAM totale", &limit, 1, horizontal);
-            }
-            if (sample) {
-                const double occupied = static_cast<double>(used) / GiB;
-                ImPlot::PlotInfLines("VRAM déjà utilisée (tous processus)", &occupied, 1, horizontal);
-            }
-            ImPlot::EndPlot();
+
+        const ImVec2 avail = ImGui::GetContentRegionAvail();
+        const float gap = em(1);
+        const bool wide = avail.x >= em(46);
+        if (wide) {
+            if (begin_card("##Configuration", {side_width(.32f, 20, 25), avail.y}))
+                config(ctx, estimate ? &*estimate : nullptr, sample);
+            end_card();
+            ImGui::SameLine(0, gap);
+            ImGui::BeginChild("##Résultats", {0, avail.y}, ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+        } else {
+            if (begin_card("##Configuration")) config(ctx, estimate ? &*estimate : nullptr, sample);
+            end_card();
         }
-        if (!sample) ImGui::TextWrapped("NVML indisponible : capacité et vérification réelle inconnues.");
-        ImGui::BeginDisabled(!sample);
-        if (ImGui::Button("Couches max qui tiennent"))
-            params_.n_gpu_layers =
-                max_gpu_layers_for(model, plan_input(params_), capacity > used ? capacity - used : 0);
-        ImGui::EndDisabled();
-        for (const auto& note : estimate.notes) ImGui::TextWrapped("• %s", note.c_str());
-        ImGui::TextWrapped("La vérification décharge le modèle courant, mesure un chargement isolé puis le décharge. "
-                           "L'estimation peut différer selon le backend compilé.");
-#ifndef BANC_HAS_CUDA
-        ImGui::TextWrapped("Build CPU : le chargement utilise le CPU ; la mesure ne valide pas une estimation CUDA.");
-#endif
-        ImGui::BeginDisabled(checking_.valid() || ctx.engine.state() != EngineState::Idle || !sample);
-        if (ImGui::Button("Vérifier réellement")) {
-            auto* telemetry = &ctx.telemetry;
-            auto* store = &ctx.store;
-            const auto params = params_;
-            const auto estimated = estimate.total_gpu();
-            checking_ = ctx.engine.submit([telemetry, store, params, estimated](EngineSession& session) {
-                session.unload();
-                // Laisser NVML observer la libération avant de prendre la référence.
-                std::this_thread::sleep_for(std::chrono::milliseconds(200));
-                auto before = telemetry->sample();
-                if (!before) throw Error("Mesure NVML indisponible avant chargement");
-                try {
-                    session.load(params);
-                    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-                    auto after = telemetry->sample();
-                    if (!after) throw Error("Mesure NVML indisponible après chargement");
-                    VramCheck result;
-                    result.model_path = path_utf8(params.model_path);
-                    result.config = config_label(params);
-                    result.estimated_gpu = estimated;
-                    result.measured_gpu =
-                        after->vram_used > before->vram_used ? after->vram_used - before->vram_used : 0;
-                    const auto now = std::time(nullptr);
-                    std::tm utc{};
-                    gmtime_s(&utc, &now);
-                    char date[32];
-                    std::strftime(date, sizeof date, "%Y-%m-%dT%H:%M:%SZ", &utc);
-                    result.timestamp = date;
-                    session.unload();
-                    store->save_vram_check(result);
-                    return result;
-                } catch (...) {
-                    session.unload();
-                    throw;
-                }
-            });
-        }
-        ImGui::EndDisabled();
-        if (checking_.valid() && busy_indicator("Vérification en cours...")) ctx.engine.cancel_all();
-        if (last_check_ && last_check_->model_path == path_utf8(path)) {
-            const auto& check = *last_check_;
-            ImGui::Text("Mesuré : %s", format_bytes(check.measured_gpu).c_str());
-            if (check.estimated_gpu)
-                ImGui::Text("Écart (mesure - estimation) : %+.1f %%",
-                            100 * (static_cast<double>(check.measured_gpu) / check.estimated_gpu - 1));
-        }
-        if (history_path_ != path_utf8(path)) {
-            history_ = ctx.store.vram_checks(path_utf8(path));
-            history_path_ = path_utf8(path);
-        }
-        if (ImGui::CollapsingHeader("Historique des vérifications")) {
-            ImGui::TextWrapped("Mesure NVML globale : les autres processus peuvent influencer le résultat.");
-            for (const auto& check : history_)
-                ImGui::TextWrapped("%s | %s | estimé %s | mesuré %s", check.timestamp.c_str(), check.config.c_str(),
-                                   format_bytes(check.estimated_gpu).c_str(), format_bytes(check.measured_gpu).c_str());
-        }
+        // Les réglages viennent peut-être de changer : estimation à jour pour l'affichage.
+        if (model) estimate = estimate_vram(*model, plan_input(params_));
+        if (model && estimate)
+            results(ctx, *model, *estimate, sample);
+        else if (wide)
+            empty_state(ctx.selected() ? "Lecture du modèle..." : "Aucun modèle choisi",
+                        ctx.selected() ? "Les tenseurs sont lus pour estimer chaque composant de la mémoire."
+                                       : "Choisissez un modèle à gauche pour estimer sa place en VRAM selon les "
+                                         "couches déportées, le contexte et le type de cache.");
+        if (wide) ImGui::EndChild();
     }
 };
 } // namespace

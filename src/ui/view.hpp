@@ -14,6 +14,8 @@ public:
     virtual const char* icon() const = 0;  // glyphe Lucide (UTF-8) ou "" si la police d'icônes est absente
     // Dessine le contenu dans la fenêtre déjà ouverte par App (ImGui::Begin/End faits par App).
     virtual void draw(AppContext& ctx) = 0;
+    // Travail de fond, chaque image, même si la fenêtre est fermée ou repliée.
+    virtual void tick(AppContext&) {}
     bool open = true;
 };
 

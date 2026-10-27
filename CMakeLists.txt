@@ -40,6 +40,7 @@ find_package(spdlog CONFIG REQUIRED)
 # --- Cœur : aucune dépendance d'interface ----------------------------------
 add_library(banc_core STATIC
   src/core/gguf_reader.cpp
+  src/core/model_roots.cpp
   src/core/vram_planner.cpp
   src/core/telemetry.cpp
   src/core/engine.cpp

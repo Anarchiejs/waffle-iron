@@ -1,4 +1,5 @@
 #include "core/bench.hpp"
+#include "ui/theme.hpp"
 #include "ui/view.hpp"
 #include "ui/widgets.hpp"
 #include <algorithm>
@@ -7,9 +8,11 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <fstream>
 #include <imgui.h>
 #include <implot.h>
+#include <iterator>
 #include <map>
 #include <mutex>
 #include <sstream>
@@ -55,8 +58,38 @@ static double history_time(const std::string& stamp) {
                    .count()) +
            h * 3600. + minute * 60. + sec;
 }
+// Sépare les libellés de configuration en une partie commune à toutes et une partie propre à chacune.
+struct SplitLabels {
+    std::string common;
+    std::vector<std::string> rows;
+};
+SplitLabels split_labels(const std::vector<std::string>& labels) {
+    std::vector<std::vector<std::string>> words;
+    for (const auto& label : labels) {
+        std::istringstream in(label);
+        words.emplace_back(std::istream_iterator<std::string>(in), std::istream_iterator<std::string>());
+    }
+    SplitLabels out;
+    if (words.size() < 2) {
+        out.rows = labels;
+        return out;
+    }
+    auto shared = [&](const std::string& w) {
+        return std::all_of(words.begin(), words.end(),
+                           [&](const auto& ws) { return std::find(ws.begin(), ws.end(), w) != ws.end(); });
+    };
+    for (const auto& w : words.front())
+        if (shared(w)) out.common += (out.common.empty() ? "" : " ") + w;
+    for (const auto& ws : words) {
+        std::string row;
+        for (const auto& w : ws)
+            if (!shared(w)) row += (row.empty() ? "" : " ") + w;
+        out.rows.push_back(row.empty() ? "(identique)" : row);
+    }
+    return out;
+}
 class BenchView final : public View {
-    int model_ = -1;
+    int model_ = -1, seen_selection_ = -1;
     char gpu_[128] = "0,20,99", ctx_[128] = "4096", kv_[128] = "f16", fa_[128] = "1", ub_[128] = "512";
     char name_[256] = "Campagne", path_[2048] = {};
     int prompt_ = 512, gen_ = 128, reps_ = 5;
@@ -87,22 +120,130 @@ class BenchView final : public View {
         if (count > 10000) throw Error("Limite : 10 000 configurations par campagne");
         return g;
     }
-    void results(AppContext& ctx) {
-        if (output_.results.empty()) {
-            ImGui::TextUnformatted("Aucun résultat");
+    void campaign(AppContext& ctx) {
+        card_title("Campagne", "Plusieurs valeurs par champ, séparées par des virgules : toutes les combinaisons "
+                               "sont mesurées.");
+        ImGui::BeginDisabled(future_.valid());
+        field_label("Modèle");
+        model_combo("##modele", ctx, model_);
+        field_label("Nom de la campagne");
+        ImGui::InputText("##nom", name_, sizeof(name_));
+        section_header("GRILLE");
+        field_pair(
+            [&](float w) {
+                field_label("Couches GPU", "-1 ou une valeur ≥ au nombre de couches : tout sur le GPU.", w);
+                ImGui::InputText("##gpu", gpu_, sizeof(gpu_));
+            },
+            [&](float w) {
+                field_label("Contextes", nullptr, w);
+                ImGui::InputText("##ctx", ctx_, sizeof(ctx_));
+            });
+        field_pair(
+            [&](float w) {
+                field_label("Types KV", "f16, q8_0, q4_0...", w);
+                ImGui::InputText("##kv", kv_, sizeof(kv_));
+            },
+            [&](float w) {
+                field_label("Flash attention", "-1 : auto, 0 : non, 1 : oui", w);
+                ImGui::InputText("##fa", fa_, sizeof(fa_));
+            });
+        field_label("Micro-lots (ubatch)");
+        ImGui::InputText("##ub", ub_, sizeof(ub_));
+        section_header("MESURE");
+        field_pair(
+            [&](float w) {
+                field_label("Tokens de consigne", nullptr, w);
+                ImGui::InputInt("##pp", &prompt_, 0, 0);
+            },
+            [&](float w) {
+                field_label("Tokens générés", nullptr, w);
+                ImGui::InputInt("##tg", &gen_, 0, 0);
+            });
+        field_label("Répétitions", "Chaque configuration est mesurée autant de fois ; écart type et aberrations en "
+                                   "découlent.");
+        ImGui::InputInt("##reps", &reps_, 0, 0);
+        ImGui::Dummy({0, em(.2f)});
+        std::optional<CampaignGrid> parsed;
+        try {
+            parsed = grid(ctx);
+            const auto n = expand_grid(*parsed).size();
+            char text[64];
+            std::snprintf(text, sizeof text, n == 1 ? "%zu configuration" : "%zu configurations", n);
+            badge(text, col::accent);
+        } catch (const std::exception& e) {
+            ImGui::PushStyleColor(ImGuiCol_Text, col::bad);
+            ImGui::TextWrapped("%s", e.what());
+            ImGui::PopStyleColor();
+        }
+        // Pendant la campagne, la progression remplace le bouton : elle reste visible au même endroit.
+        if (future_.valid()) {
+            ImGui::EndDisabled(); // le bouton Annuler doit rester actif
+            std::string label;
+            float fraction;
+            {
+                std::lock_guard lock(progress_->mutex);
+                label = progress_->label;
+                fraction = progress_->fraction;
+            }
+            if (busy_indicator(label.c_str(), fraction)) {
+                progress_->cancel = true;
+                ctx.engine.cancel_all();
+            }
             return;
         }
-        if (ImGui::Button("Enregistrer")) {
+        ImGui::BeginDisabled(!parsed.has_value());
+        if (primary_button("Lancer la campagne", {-FLT_MIN, 0})) {
+            try {
+                progress_ = std::make_shared<CampaignProgress>();
+                auto p = progress_;
+                auto* engine = &ctx.engine;
+                auto* telemetry = &ctx.telemetry;
+                future_ = std::async(std::launch::async, [p, engine, telemetry, g = *parsed] {
+                    CampaignOutput out;
+                    out.results = run_campaign(
+                        *engine, telemetry, g,
+                        [p](float f, const std::string& label) {
+                            std::lock_guard lock(p->mutex);
+                            p->fraction = f;
+                            p->label = label;
+                            return !p->cancel.load();
+                        },
+                        &out.errors);
+                    return out;
+                });
+            } catch (const std::exception& e) {
+                ctx.notify(e.what(), true);
+            }
+        }
+        ImGui::EndDisabled();
+        ImGui::EndDisabled();
+    }
+    void results(AppContext& ctx) {
+        if (output_.results.empty()) {
+            empty_state("Aucun résultat",
+                        future_.valid() ? "La campagne est en cours ; les résultats s'afficheront à la fin."
+                                        : "Lancez une campagne, ou chargez-en une depuis l'historique.");
+            return;
+        }
+        if (primary_button("Enregistrer")) {
             ctx.store.save_campaign(name_, output_.results);
             refresh_ = true;
             ctx.notify("Campagne enregistrée");
         }
         ImGui::SameLine();
-        if (ImGui::Button("Copier en Markdown")) ImGui::SetClipboardText(to_markdown(output_.results).c_str());
-        ImGui::InputText("Chemin d'export", path_, sizeof(path_));
+        if (ImGui::Button("Copier en Markdown")) {
+            ImGui::SetClipboardText(to_markdown(output_.results).c_str());
+            ctx.notify("Tableau copié");
+        }
+        ImGui::SameLine();
+        const float export_w = ImGui::CalcTextSize("CSV").x + ImGui::CalcTextSize("Markdown").x +
+                               ImGui::GetStyle().FramePadding.x * 4 + ImGui::GetStyle().ItemSpacing.x * 2;
+        if (ImGui::GetContentRegionAvail().x < em(14) + export_w) ImGui::NewLine();
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - export_w);
+        ImGui::InputTextWithHint("##export", "Chemin d'export", path_, sizeof(path_));
         for (int kind = 0; kind < 2; ++kind) {
-            if (kind) ImGui::SameLine();
-            if (ImGui::Button(kind ? "Exporter Markdown" : "Exporter CSV")) {
+            ImGui::SameLine();
+            if (ImGui::Button(kind ? "Markdown" : "CSV")) {
                 auto path = std::filesystem::u8path(path_);
                 path.replace_extension(kind ? ".md" : ".csv");
                 if (path.has_parent_path()) std::filesystem::create_directories(path.parent_path());
@@ -112,30 +253,62 @@ class BenchView final : public View {
                 if (!file) throw Error("Impossible d'écrire l'export");
                 ctx.notify("Export enregistré");
             }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip(kind ? "Exporter en Markdown" : "Exporter en CSV");
         }
-        if (ImGui::BeginTable("mesures", 6, ImGuiTableFlags_Borders | ImGuiTableFlags_ScrollX)) {
-            for (const char* h :
-                 {"Configuration", "pp ± σ (tok/s)", "tg ± σ (tok/s)", "TTFT", "VRAM max", "Aberrations"})
+        std::vector<std::string> full;
+        for (const auto& r : output_.results) full.push_back(config_label(r.config));
+        const auto split = split_labels(full);
+        if (!split.common.empty()) {
+            ImGui::Dummy({0, em(.1f)});
+            ImGui::TextDisabled("Commun :");
+            ImGui::SameLine();
+            push_font(fonts().mono, .88f);
+            ImGui::TextWrapped("%s", split.common.c_str());
+            ImGui::PopFont();
+        }
+        ImGui::Dummy({0, em(.1f)});
+        const float avail_h = ImGui::GetContentRegionAvail().y;
+        // Juste la hauteur des lignes, plafonnée pour laisser la place au graphique.
+        const float row_h = ImGui::GetTextLineHeight() + ImGui::GetStyle().CellPadding.y * 2;
+        const float table_h = std::min(row_h * static_cast<float>(output_.results.size() + 1) + em(.3f),
+                                       std::clamp(avail_h * .42f, em(8), em(20)));
+        if (ImGui::BeginTable("mesures", 7,
+                              ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_ScrollY |
+                                  ImGuiTableFlags_ScrollX | ImGuiTableFlags_SizingFixedFit,
+                              {0, table_h})) {
+            ImGui::TableSetupScrollFreeze(1, 1);
+            ImGui::TableSetupColumn("#");
+            ImGui::TableSetupColumn("Configuration", ImGuiTableColumnFlags_WidthStretch);
+            for (const char* h : {"pp ± σ (tok/s)", "tg ± σ (tok/s)", "TTFT", "VRAM max", "Aberrations"})
                 ImGui::TableSetupColumn(h);
+            ImGui::PushStyleColor(ImGuiCol_Text, col::dim);
             ImGui::TableHeadersRow();
+            ImGui::PopStyleColor();
+            int index = 0;
             for (const auto& r : output_.results) {
                 ImGui::TableNextRow();
                 ImGui::TableNextColumn();
-                ImGui::TextUnformatted(config_label(r.config).c_str());
+                ImGui::TextDisabled("%d", ++index);
                 ImGui::TableNextColumn();
-                ImGui::Text("%.2f ± %.2f", r.pp.mean, r.pp.stddev);
+                push_font(fonts().mono, .88f);
+                ImGui::TextUnformatted(split.rows[static_cast<size_t>(index - 1)].c_str());
+                ImGui::PopFont();
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", full[static_cast<size_t>(index - 1)].c_str());
                 ImGui::TableNextColumn();
-                ImGui::Text("%.2f ± %.2f", r.tg.mean, r.tg.stddev);
+                ImGui::Text("%.1f ± %.1f", r.pp.mean, r.pp.stddev);
+                ImGui::TableNextColumn();
+                ImGui::Text("%.1f ± %.1f", r.tg.mean, r.tg.stddev);
                 ImGui::TableNextColumn();
                 ImGui::TextUnformatted(format_duration_ms(r.ttft.mean).c_str());
                 ImGui::TableNextColumn();
                 ImGui::TextUnformatted(r.vram_peak ? format_bytes(r.vram_peak).c_str() : "Non mesurée");
                 ImGui::TableNextColumn();
-                ImGui::Text("pp: %zu / tg: %zu / ttft: %zu", r.pp.outliers.size(), r.tg.outliers.size(),
-                            r.ttft.outliers.size());
+                ImGui::Text("%zu / %zu / %zu", r.pp.outliers.size(), r.tg.outliers.size(), r.ttft.outliers.size());
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Aberrations écartées : pp / tg / TTFT");
             }
             ImGui::EndTable();
         }
+        ImGui::Dummy({0, em(.1f)});
         std::vector<double> xp, xt, pp, tg, ep, et;
         std::vector<std::string> labels;
         std::vector<const char*> ticks;
@@ -147,23 +320,50 @@ class BenchView final : public View {
             tg.push_back(r.tg.mean);
             ep.push_back(r.pp.stddev);
             et.push_back(r.tg.stddev);
-            labels.push_back(config_label(r.config));
+            labels.push_back("#" + std::to_string(i + 1));
         }
         for (const auto& label : labels) ticks.push_back(label.c_str());
-        if (ImPlot::BeginPlot("Débits", ImVec2(-1, 300))) {
-            ImPlot::SetupAxes("Configuration", "tokens/s");
+        // Débits de lecture (pp) et de génération (tg) : échelles très différentes, deux axes.
+        if (ImPlot::BeginPlot("##Débits", ImVec2(-1, std::max(em(12), ImGui::GetContentRegionAvail().y)),
+                              ImPlotFlags_NoMenus | ImPlotFlags_NoBoxSelect)) {
+            ImPlot::SetupAxis(ImAxis_X1, nullptr, ImPlotAxisFlags_NoHighlight);
+            ImPlot::SetupAxis(ImAxis_Y1, "Lecture (pp) tok/s", ImPlotAxisFlags_NoHighlight);
+            ImPlot::SetupAxis(ImAxis_Y2, "Génération (tg) tok/s", ImPlotAxisFlags_Opposite | ImPlotAxisFlags_NoHighlight);
+            // Échelles fixées sur le plus haut point (barre + écart type) avec une marge, pour ne rien couper.
+            auto top = [](const std::vector<double>& v, const std::vector<double>& e) {
+                double m = 0;
+                for (size_t i = 0; i < v.size(); ++i) m = std::max(m, v[i] + e[i]);
+                return m > 0 ? m * 1.12 : 1.;
+            };
+            ImPlot::SetupAxisLimits(ImAxis_Y1, 0, top(pp, ep), ImPlotCond_Always);
+            ImPlot::SetupAxisLimits(ImAxis_Y2, 0, top(tg, et), ImPlotCond_Always);
+            ImPlot::SetupLegend(ImPlotLocation_North,
+                                ImPlotLegendFlags_Outside | ImPlotLegendFlags_Horizontal | ImPlotLegendFlags_NoButtons);
+            ImPlot::SetupAxisLimits(ImAxis_X1, -.6, static_cast<double>(labels.size()) - .4, ImPlotCond_Always);
             ImPlot::SetupAxisTicks(ImAxis_X1, 0., static_cast<double>(labels.size() - 1),
                                    static_cast<int>(ticks.size()), ticks.data());
             int n = static_cast<int>(pp.size());
-            ImPlot::PlotBars("pp", xp.data(), pp.data(), n, .34);
-            ImPlot::PlotBars("tg", xt.data(), tg.data(), n, .34);
-            ImPlot::PlotErrorBars("σ pp", xp.data(), pp.data(), ep.data(), n);
-            ImPlot::PlotErrorBars("σ tg", xt.data(), tg.data(), et.data(), n);
+            ImPlot::SetAxes(ImAxis_X1, ImAxis_Y1);
+            ImPlot::PlotBars("Lecture (pp)", xp.data(), pp.data(), n, .34);
+            ImPlot::PlotErrorBars("Lecture (pp)", xp.data(), pp.data(), ep.data(), n);
+            ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
+            ImPlot::PlotBars("Génération (tg)", xt.data(), tg.data(), n, .34);
+            ImPlot::PlotErrorBars("Génération (tg)", xt.data(), tg.data(), et.data(), n);
+            if (ImPlot::IsPlotHovered()) {
+                const double x = ImPlot::GetPlotMousePos(ImAxis_X1, ImAxis_Y1).x;
+                const long i = std::lround(x);
+                if (i >= 0 && i < static_cast<long>(output_.results.size()))
+                    ImGui::SetTooltip("#%ld  %s", i + 1, config_label(output_.results[static_cast<size_t>(i)].config).c_str());
+            }
             ImPlot::EndPlot();
         }
     }
     void history(AppContext& ctx) {
-        bool changed = model_combo("Modèle historique", ctx, history_model_);
+        const float button = ImGui::CalcTextSize("Actualiser").x + ImGui::GetStyle().FramePadding.x * 2;
+        bool changed = model_combo("##historique", ctx, history_model_,
+                                   std::min(em(26), ImGui::GetContentRegionAvail().x - button -
+                                                        ImGui::GetStyle().ItemSpacing.x));
+        ImGui::SameLine();
         if (ImGui::Button("Actualiser")) refresh_ = true;
         if (refresh_ || changed) {
             records_ = ctx.store.list_campaigns();
@@ -172,52 +372,158 @@ class BenchView final : public View {
                 history_ = ctx.store.history(ctx.library[static_cast<size_t>(history_model_)].path.string());
             refresh_ = false;
         }
-        for (const auto& record : records_) {
-            ImGui::PushID(static_cast<int>(record.id));
-            ImGui::Text("%s · %s · %d résultats · %s", record.name.c_str(), record.created_at.c_str(), record.n_results,
-                        record.model_names.c_str());
-            if (ImGui::Button("Charger")) {
-                try {
-                    output_.results = ctx.store.load_campaign(record.id);
-                    output_.errors.clear();
-                } catch (const std::exception& e) {
-                    ctx.notify(e.what(), true);
-                }
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Supprimer")) ImGui::OpenPopup("Confirmer");
-            if (ImGui::BeginPopup("Confirmer")) {
-                ImGui::TextUnformatted("Supprimer cette campagne ?");
-                if (ImGui::Button("Confirmer la suppression")) {
+        if (records_.empty()) {
+            empty_state("Aucune campagne enregistrée", "Les campagnes enregistrées depuis l'onglet Résultats "
+                                                       "apparaissent ici.");
+            return;
+        }
+        // Juste la hauteur des lignes, plafonnée pour laisser la place au graphique.
+        const float row_h = ImGui::GetFrameHeight() + ImGui::GetStyle().CellPadding.y * 2;
+        const float list_h = std::min(row_h * static_cast<float>(records_.size() + 1) + em(.3f),
+                                      history_.empty() ? ImGui::GetContentRegionAvail().y
+                                                       : std::clamp(ImGui::GetContentRegionAvail().y * .4f, em(8),
+                                                                    em(18)));
+        if (ImGui::BeginTable("campagnes", 5,
+                              ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_ScrollY |
+                                  ImGuiTableFlags_SizingFixedFit,
+                              {0, list_h})) {
+            ImGui::TableSetupScrollFreeze(0, 1);
+            ImGui::TableSetupColumn("Campagne", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+            ImGui::TableSetupColumn("Date");
+            ImGui::TableSetupColumn("Résultats");
+            ImGui::TableSetupColumn("Modèles", ImGuiTableColumnFlags_WidthStretch, 1.2f);
+            ImGui::TableSetupColumn("##actions");
+            ImGui::PushStyleColor(ImGuiCol_Text, col::dim);
+            ImGui::TableHeadersRow();
+            ImGui::PopStyleColor();
+            for (const auto& record : records_) {
+                ImGui::PushID(static_cast<int>(record.id));
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::AlignTextToFramePadding();
+                ImGui::TextUnformatted(record.name.c_str());
+                ImGui::TableNextColumn();
+                ImGui::AlignTextToFramePadding();
+                ImGui::TextDisabled("%s", record.created_at.c_str());
+                ImGui::TableNextColumn();
+                ImGui::AlignTextToFramePadding();
+                ImGui::Text("%d", record.n_results);
+                ImGui::TableNextColumn();
+                ImGui::AlignTextToFramePadding();
+                ImGui::TextUnformatted(record.model_names.c_str());
+                ImGui::TableNextColumn();
+                if (ImGui::SmallButton("Charger")) {
                     try {
-                        ctx.store.delete_campaign(record.id);
-                        refresh_ = true;
-                        ImGui::CloseCurrentPopup();
+                        output_.results = ctx.store.load_campaign(record.id);
+                        output_.errors.clear();
+                        ctx.notify("Campagne chargée dans Résultats");
                     } catch (const std::exception& e) {
                         ctx.notify(e.what(), true);
                     }
                 }
-                ImGui::EndPopup();
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Supprimer")) ImGui::OpenPopup("Confirmer");
+                if (ImGui::BeginPopup("Confirmer")) {
+                    ImGui::TextUnformatted("Supprimer cette campagne ?");
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(.55f, .22f, .25f, 1));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(.68f, .28f, .31f, 1));
+                    if (ImGui::Button("Confirmer la suppression")) {
+                        try {
+                            ctx.store.delete_campaign(record.id);
+                            refresh_ = true;
+                            ImGui::CloseCurrentPopup();
+                        } catch (const std::exception& e) {
+                            ctx.notify(e.what(), true);
+                        }
+                    }
+                    ImGui::PopStyleColor(2);
+                    ImGui::EndPopup();
+                }
+                ImGui::PopID();
             }
-            ImGui::PopID();
+            ImGui::EndTable();
         }
-        if (!history_.empty() && ImPlot::BeginPlot("Historique des débits", ImVec2(-1, 300))) {
-            ImPlot::SetupAxes("Date UTC", "tokens/s");
-            ImPlot::SetupAxisScale(ImAxis_X1, ImPlotScale_Time);
-            std::map<std::string, std::vector<size_t>> groups;
-            for (size_t i = 0; i < history_.size(); ++i) groups[history_[i].config].push_back(i);
+        if (history_.empty()) return;
+        // Une courbe dans le temps n'a de sens qu'à partir de deux dates distinctes.
+        double t_min = history_time(history_.front().timestamp), t_max = t_min;
+        for (const auto& h : history_) {
+            t_min = std::min(t_min, history_time(h.timestamp));
+            t_max = std::max(t_max, history_time(h.timestamp));
+        }
+        if (t_max - t_min < 1) {
+            ImGui::Dummy({0, em(.6f)});
+            dim_wrapped("L'évolution dans le temps s'affiche à partir de deux campagnes enregistrées pour ce "
+                        "modèle, à des moments différents.");
+            return;
+        }
+        std::map<std::string, std::vector<size_t>> groups;
+        for (size_t i = 0; i < history_.size(); ++i) groups[history_[i].config].push_back(i);
+        std::vector<std::string> configs;
+        for (const auto& group : groups) configs.push_back(group.first);
+        const auto names = split_labels(configs); // légende courte : seulement ce qui varie
+        if (ImPlot::BeginPlot("##Historique", ImVec2(-1, std::max(em(12), ImGui::GetContentRegionAvail().y)),
+                              ImPlotFlags_NoMenus | ImPlotFlags_NoBoxSelect)) {
+            // Lecture (pp) à gauche, génération (tg) à droite : sur un seul axe, tg serait écrasé contre zéro.
+            ImPlot::SetupAxes(nullptr, "Lecture (pp) tok/s", ImPlotAxisFlags_NoHighlight, ImPlotAxisFlags_NoHighlight);
+            ImPlot::SetupAxis(ImAxis_Y2, "Génération (tg) tok/s", ImPlotAxisFlags_Opposite | ImPlotAxisFlags_NoHighlight);
+            double pp_max = 1, tg_max = 1;
+            for (const auto& h : history_) {
+                pp_max = std::max(pp_max, h.pp_mean);
+                tg_max = std::max(tg_max, h.tg_mean);
+            }
+            ImPlot::SetupAxisLimits(ImAxis_Y1, 0, pp_max * 1.15, ImPlotCond_Always);
+            ImPlot::SetupAxisLimits(ImAxis_Y2, 0, tg_max * 1.15, ImPlotCond_Always);
+            // Abscisses en secondes depuis la première mesure : en secondes absolues (~1,8e9), ImPlot perd les
+            // segments entre les points. Le formateur réaffiche l'heure locale.
+            // Précision des dates selon la durée couverte (sinon plusieurs graduations affichent la même minute).
+            static struct {
+                double origin;
+                const char* format;
+            } axis;
+            const double span = t_max - t_min;
+            axis = {t_min, span < 3600 ? "%H:%M:%S" : span < 3 * 86400 ? "%d/%m %H:%M" : "%d/%m/%y"};
+            ImPlot::SetupAxisFormat(
+                ImAxis_X1,
+                [](double v, char* buf, int size, void* data) {
+                    const auto* a = static_cast<decltype(axis)*>(data);
+                    const auto t = static_cast<std::time_t>(a->origin + v);
+                    std::tm tm{};
+                    localtime_s(&tm, &t);
+                    return static_cast<int>(std::strftime(buf, static_cast<size_t>(size), a->format, &tm));
+                },
+                &axis);
+            ImPlot::SetupAxisLimits(ImAxis_X1, -span * .06, span * 1.06, ImPlotCond_Always);
+            ImPlot::SetupLegend(ImPlotLocation_North,
+                                ImPlotLegendFlags_Outside | ImPlotLegendFlags_Horizontal | ImPlotLegendFlags_NoButtons);
+            size_t group_index = 0;
             for (const auto& [config, indices] : groups) {
+                const std::string& name = names.rows[group_index++];
                 std::vector<double> x, pp, tg;
                 for (size_t i : indices) {
-                    x.push_back(history_time(history_[i].timestamp));
+                    x.push_back(history_time(history_[i].timestamp) - t_min);
                     pp.push_back(history_[i].pp_mean);
                     tg.push_back(history_[i].tg_mean);
                 }
-                ImPlot::PlotLine((config + " pp").c_str(), x.data(), pp.data(), static_cast<int>(x.size()));
-                ImPlot::PlotLine((config + " tg").c_str(), x.data(), tg.data(), static_cast<int>(x.size()));
+                // ImPlot dessine les points et la légende ; les segments sont tracés avec ImGui, car les
+                // segments longs et obliques de PlotLine sortent en pointillés dans ce graphique.
+                ImPlotSpec spec;
+                spec.Marker = ImPlotMarker_Circle;
+                auto plot = [&](const std::string& label, const std::vector<double>& ys) {
+                    ImPlot::PlotScatter(label.c_str(), x.data(), ys.data(), static_cast<int>(x.size()), spec);
+                    const ImU32 color = ImGui::GetColorU32(ImPlot::GetLastItemColor());
+                    ImPlot::PushPlotClipRect();
+                    for (size_t k = 1; k < x.size(); ++k)
+                        ImPlot::GetPlotDrawList()->AddLine(ImPlot::PlotToPixels(x[k - 1], ys[k - 1]),
+                                                           ImPlot::PlotToPixels(x[k], ys[k]), color, em(.12f));
+                    ImPlot::PopPlotClipRect();
+                };
+                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y1);
+                plot(name + " pp", pp);
+                ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
+                plot(name + " tg", tg);
             }
             if (ImPlot::IsPlotHovered()) {
-                double x = ImPlot::GetPlotMousePos().x;
+                double x = ImPlot::GetPlotMousePos(ImAxis_X1, ImAxis_Y1).x + t_min;
                 size_t i = 0;
                 for (size_t j = 1; j < history_.size(); ++j)
                     if (std::abs(history_time(history_[j].timestamp) - x) <
@@ -248,94 +554,66 @@ public:
         }
     }
     const char* title() const override { return "Banc d'essai"; }
+    const char* subtitle() const override {
+        return "Mesurez débits, latence et VRAM sur une grille de configurations, puis suivez-les dans le temps.";
+    }
     const char* icon() const override { return ""; }
     void draw(AppContext& ctx) override {
         engine_ = &ctx.engine;
+        if (ctx.selected_model != seen_selection_) {
+            seen_selection_ = ctx.selected_model;
+            if (!future_.valid() && ctx.selected_model >= 0) model_ = ctx.selected_model;
+            if (history_model_ < 0 && ctx.selected_model >= 0) {
+                history_model_ = ctx.selected_model;
+                refresh_ = true;
+            }
+        }
         try {
             if (is_ready(future_)) {
                 output_ = future_.get();
                 ctx.notify("Campagne terminée");
             }
-            if (future_.valid()) {
-                std::string label;
-                float fraction;
-                {
-                    std::lock_guard lock(progress_->mutex);
-                    label = progress_->label;
-                    fraction = progress_->fraction;
-                }
-                if (busy_indicator(label.c_str(), fraction)) {
-                    progress_->cancel = true;
-                    ctx.engine.cancel_all();
-                }
+            const ImVec2 avail = ImGui::GetContentRegionAvail();
+            const float gap = em(1);
+            const bool wide = avail.x >= em(48);
+            if (wide) {
+                if (begin_card("##Campagne", {side_width(.3f, 20, 25), avail.y})) campaign(ctx);
+                end_card();
+                ImGui::SameLine(0, gap);
+            } else {
+                if (begin_card("##Campagne")) campaign(ctx);
+                end_card();
             }
-            if (ImGui::BeginTabBar("banc")) {
-                if (ImGui::BeginTabItem("Campagne")) {
-                    ImGui::BeginDisabled(future_.valid());
-                    model_combo("Modèle", ctx, model_);
-                    ImGui::InputText("Nom", name_, sizeof(name_));
-                    ImGui::InputText("Couches GPU", gpu_, sizeof(gpu_));
-                    ImGui::InputText("Contextes", ctx_, sizeof(ctx_));
-                    ImGui::InputText("Types KV", kv_, sizeof(kv_));
-                    ImGui::InputText("Flash attention (-1,0,1)", fa_, sizeof(fa_));
-                    ImGui::InputText("Ubatch", ub_, sizeof(ub_));
-                    ImGui::InputInt("Tokens consigne", &prompt_);
-                    ImGui::InputInt("Tokens génération", &gen_);
-                    ImGui::InputInt("Répétitions", &reps_);
-                    std::optional<CampaignGrid> parsed;
-                    try {
-                        parsed = grid(ctx);
-                        ImGui::Text("%zu configurations", expand_grid(*parsed).size());
-                    } catch (const std::exception& e) {
-                        ImGui::TextWrapped("Grille invalide : %s", e.what());
-                    }
-                    ImGui::BeginDisabled(!parsed.has_value());
-                    if (ImGui::Button("Lancer")) {
+            if (begin_card("##Sorties", {0, wide ? avail.y : std::max(em(28), ImGui::GetContentRegionAvail().y)},
+                           ImGuiWindowFlags_NoScrollbar)) {
+                for (const auto& error : output_.errors) {
+                    ImGui::PushStyleColor(ImGuiCol_Text, col::bad);
+                    ImGui::TextWrapped("Configuration en échec : %s", error.c_str());
+                    ImGui::PopStyleColor();
+                }
+                if (ImGui::BeginTabBar("banc")) {
+                    if (ImGui::BeginTabItem("Résultats")) {
+                        ImGui::Dummy({0, em(.2f)});
                         try {
-                            progress_ = std::make_shared<CampaignProgress>();
-                            auto p = progress_;
-                            auto* engine = &ctx.engine;
-                            auto* telemetry = &ctx.telemetry;
-                            future_ = std::async(std::launch::async, [p, engine, telemetry, g = *parsed] {
-                                CampaignOutput out;
-                                out.results = run_campaign(
-                                    *engine, telemetry, g,
-                                    [p](float f, const std::string& label) {
-                                        std::lock_guard lock(p->mutex);
-                                        p->fraction = f;
-                                        p->label = label;
-                                        return !p->cancel.load();
-                                    },
-                                    &out.errors);
-                                return out;
-                            });
+                            results(ctx);
                         } catch (const std::exception& e) {
                             ctx.notify(e.what(), true);
                         }
+                        ImGui::EndTabItem();
                     }
-                    ImGui::EndDisabled();
-                    ImGui::EndDisabled();
-                    ImGui::EndTabItem();
-                }
-                if (ImGui::BeginTabItem("Résultats")) {
-                    try {
-                        results(ctx);
-                    } catch (const std::exception& e) {
-                        ctx.notify(e.what(), true);
+                    if (ImGui::BeginTabItem("Historique")) {
+                        ImGui::Dummy({0, em(.2f)});
+                        try {
+                            history(ctx);
+                        } catch (const std::exception& e) {
+                            ctx.notify(e.what(), true);
+                        }
+                        ImGui::EndTabItem();
                     }
-                    ImGui::EndTabItem();
+                    ImGui::EndTabBar();
                 }
-                if (ImGui::BeginTabItem("Historique")) {
-                    try {
-                        history(ctx);
-                    } catch (const std::exception& e) {
-                        ctx.notify(e.what(), true);
-                    }
-                    ImGui::EndTabItem();
-                }
-                ImGui::EndTabBar();
             }
-            for (const auto& error : output_.errors) ImGui::TextWrapped("Configuration en échec : %s", error.c_str());
+            end_card();
         } catch (const std::exception& e) {
             ctx.notify(e.what(), true);
         }

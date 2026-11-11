@@ -15,6 +15,19 @@ Two programs:
 
 Windows is the only target platform.
 
+The GitHub repository is [Banc-Local](https://github.com/Anarchiejs/Banc-Local). If that repository is renamed to `waffle-iron`, GitHub keeps the old URL working.
+
+## Limits
+
+- Windows x64 only. The interface needs DirectX 11. The command line reads its arguments with the Win32 API.
+- A CPU build runs models on the processor. CUDA and the monitor need an NVIDIA driver. The monitor reads GPU index 0 through NVML. Other GPUs have no monitor and no CUDA backend.
+- The checked-in `cuda-release` preset compiles for `sm_89` only. That cubin does not run on `sm_86` or on Blackwell (`sm_100`, `sm_120`). `install.cmd` writes a gitignored preset for the GPU that is actually installed.
+- Waffle Iron does not download models and does not contact Ollama, LM Studio, or `registry.ollama.ai`. That name is only a prefix in local manifest paths. The scan reads GGUF files on disk and, when those folders exist, Ollama blobs and manifest JSON, so it can name a digest and skip draft and projector blobs.
+- Nothing is uploaded. "Telemetry" in the source is local NVML sampling. The first build does use the network, for the llama.cpp submodule and the vcpkg ports.
+- The library database is `%LOCALAPPDATA%\WaffleIron\waffle.db`. It stores the full path of each file. Interface state is `imgui.ini` next to the executable. Exports go to the path you choose.
+- Memory estimates are approximate. **Verify for real** checks them on the installed GPU. A result from one card does not transfer to another.
+- Waffle Iron is not an official project of ggml, Ollama, LM Studio, or NVIDIA. No model weights are included, except the random-weight test fixture `tests\data\tiny-llama.gguf`.
+
 ## Requirements
 
 | Tool | Required | Where to install it |
@@ -34,7 +47,7 @@ Without the CUDA Toolkit the interface still builds: models run on the CPU. The 
 ## Quick install
 
 ```bat
-git clone --recurse-submodules <url> waffle-iron
+git clone --recurse-submodules https://github.com/Anarchiejs/Banc-Local.git waffle-iron
 cd waffle-iron
 install.cmd
 ```
@@ -47,7 +60,7 @@ install.cmd
 4. chooses a CUDA build for the GPU architecture (`cuda-release-local`), or `cpu-release` when there is no usable NVIDIA GPU with a toolkit;
 5. configures, builds, then opens `WaffleIron.exe`.
 
-The first run downloads the vcpkg dependencies (SQLite, spdlog, Dear ImGui, ImPlot, Catch2): it needs the internet. A CUDA build of llama.cpp is long and resumes where it stopped if you run `install.cmd` again. The log is `build\install.log`.
+The first run downloads the vcpkg dependencies (SQLite, Dear ImGui, ImPlot, Catch2): it needs the internet. A CUDA build of llama.cpp is long and resumes where it stopped if you run `install.cmd` again. The log is `build\install.log`.
 
 To open the interface later, without rebuilding:
 
@@ -91,7 +104,7 @@ Waffle Iron does not download anything. It indexes the GGUF files already on dis
 | `%USERPROFILE%\.cache\lm-studio\models` | older LM Studio cache folder |
 | `%OLLAMA_MODELS%\blobs`, or `%OLLAMA_MODELS%` when there is no `blobs` subfolder | a moved Ollama library |
 
-Example: copy `gemma-4-E4B-Q4_K_M.gguf` into `C:\Users\You\models`, then open Waffle Iron (or click **Rescan**). The model shows up with its name, architecture, quantization, size, parameter count, and context.
+Example: copy `gemma-4-E4B-Q4_K_M.gguf` into `%USERPROFILE%\models`, then open Waffle Iron (or click **Rescan**). The model shows up with its name, architecture, quantization, size, parameter count, and context.
 
 The Library ignores files that are not GGUF, vision projectors (`mmproj`, architecture `clip`), and split model parts other than the first (`…-00002-of-…`). Another folder is added with **Add a folder** (UTF-8 path). The record of a selected model accepts comma-separated tags and notes, stored in the database.
 
@@ -111,11 +124,9 @@ Example. You have a Q4_K_M for everyday use and a Q8_0 to compare. After the sca
 
 Purpose: see where the memory goes before loading, then check it on the GPU.
 
-Example, on an RTX 4060 Ti with gemma-4-E4B in Q4_K_M. Choose the model. Set the context (4k, 8k, 32k…), the K cache and the V cache (`f16`, `q8_0`, `q4_0`…), flash attention, and **Full SWA cache**. The chart stacks weights, KV cache, buffers, and overhead, on the GPU and the CPU, with total VRAM and VRAM already in use. **Max layers that fit** suggests an offload that stays inside free memory. **Verify for real** loads the model, measures the gap, unloads it, and writes that into the history.
+Example. Choose a Q4_K_M model. Set the context (4k, 8k, 32k…), the K cache and the V cache (`f16`, `q8_0`, `q4_0`…), flash attention, and **Full SWA cache**. The chart stacks weights, KV cache, buffers, and overhead, on the GPU and the CPU, with total VRAM and VRAM already in use. **Max layers that fit** suggests an offload that stays inside free memory. **Verify for real** loads the model, measures the gap, unloads it, and writes that into the history. The NVML sample is the whole GPU: another program can move it. The gap belongs to that machine.
 
-Reference measurements on this GPU, gemma-4-E4B Q4_K_M: a gap of −1.1% to +0.4% with everything on the GPU (context 4k to 32k, f16 or q8_0 cache, with or without flash attention); +7% with partial offload (`--ngl 20`). The NVML measurement is global: another program can move it.
-
-Sliding-window models (Gemma): llama.cpp allocates the cache of those layers for the whole context by default (box checked, `--swa-full 1`). Unchecking **Full SWA cache** (`--swa-full 0`) limits it to the window. On gemma-4-E4B, at 32k tokens: 5.3 GB down to 4.0 GB of VRAM. Rewinding in the sequence is then no longer possible.
+Sliding-window models (Gemma): llama.cpp allocates the cache of those layers for the whole context by default (box checked, `--swa-full 1`). Unchecking **Full SWA cache** (`--swa-full 0`) limits it to the window and uses less VRAM at long context. Rewinding in the sequence is then no longer possible.
 
 A CPU build says that verification does not validate a CUDA estimate.
 
@@ -161,7 +172,7 @@ waffle gpu                     GPU state (NVML)
 
 `waffle` and `waffle <command> --help` list the options. `<model>` is a file path or a unique substring of the name in the database. `--db PATH` changes the database (default: `%LOCALAPPDATA%\WaffleIron\waffle.db`).
 
-`waffle plan --verify` actually loads the model, measures the VRAM it took, and prints the gap against the estimate, plus the allocations llama.cpp reported. The figures cited above (RTX 4060 Ti, gemma-4-E4B Q4_K_M) come from that check.
+`waffle plan --verify` actually loads the model, measures the VRAM it took, and prints the gap against the estimate, plus the allocations llama.cpp reported. That gap is for the GPU in the machine, not a portable specification.
 
 `waffle bench` accepts comma-separated lists for `--ngl`, `--ctx`, `--ctk`, `--fa`, `--pp`, `--tg`, and `--reps`. The campaign is saved and the Markdown table is printed. `waffle export <id> --csv -o file.csv` or `--md` writes a campaign back out.
 
@@ -173,10 +184,10 @@ The versioned presets are in `CMakePresets.json`. `install.cmd` does not modify 
 |---|---|
 | `cpu-debug` | development, tests |
 | `cpu-release` | CPU Release, the one CI uses |
-| `cuda-release` | CUDA Release, architecture `sm_89` (RTX 40 series) |
+| `cuda-release` | CUDA Release, architecture `sm_89` only (Ada). It does not run on `sm_86` or on Blackwell |
 | `asan` | CPU Debug with AddressSanitizer |
 
-When a GPU is detected, `install.cmd` writes `CMakeUserPresets.json` (gitignored): a `cuda-release-local` preset that inherits `cuda-release` and replaces `CMAKE_CUDA_ARCHITECTURES` (for example `86` for an RTX 30 series, `89` for an RTX 40 series, `120` for an RTX 50 series). The binary goes to `build\cuda-release-local`. The repository's `cuda-release` preset stays on `sm_89` and its `build\cuda-release` directory.
+When a GPU is detected, `install.cmd` writes `CMakeUserPresets.json` (gitignored): a `cuda-release-local` preset that inherits `cuda-release` and replaces `CMAKE_CUDA_ARCHITECTURES` (for example `86` for Ampere, `89` for Ada, `120` for Blackwell). The binary goes to `build\cuda-release-local`. The repository's `cuda-release` preset stays on `sm_89` and its `build\cuda-release` directory. Use that preset only for an `sm_89` GPU. `install.cmd` is the path that matches the installed card.
 
 ```bat
 scripts\dev.cmd cmake --preset cpu-debug
@@ -240,7 +251,7 @@ Deleting `waffle.db` starts from an empty library; the next scan rebuilds it. Th
 
 **The monitor says NVML is unavailable.** No NVIDIA GPU, or a driver that is too old. The rest of the workbench still works. A CPU build does not block NVML.
 
-**Accents are unreadable in `cmd.exe`.** The console is still on an OEM code page. `install.cmd` switches to UTF-8. In a terminal that is already open: `chcp 65001`. Windows Terminal usually does this on its own. The sources and this file are UTF-8.
+**The console shows the wrong characters.** `install.cmd` switches the code page to UTF-8 (`chcp 65001`). Windows Terminal usually does this on its own. The sources and this file are UTF-8.
 
 **The CUDA build does not seem to target the right GPU.** Check the preset printed by `install.cmd` and `CMakeUserPresets.json`. `cmake --preset cuda-release` rebuilds the other directory, the one fixed at `sm_89`.
 
@@ -249,7 +260,7 @@ Deleting `waffle.db` starts from an empty library; the next scan rebuilds it. Th
 ## Architecture
 
 ```
-external/llama.cpp/   pinned submodule (updated on purpose, tests as a safety net)
+external/llama.cpp/   pinned submodule 4b851fb (updated on purpose, tests as a safety net)
 src/core/             no interface code: gguf_reader, model_roots, engine, vram_planner, bench, sampler_lab, comparator, telemetry
 src/store/            SQLite
 src/cli/              waffle.exe
@@ -271,6 +282,20 @@ The interface uses Inter and the Lucide icons when `Inter-Regular.ttf`, `Inter-S
 - Inter: https://github.com/rsms/inter (SIL Open Font License 1.1)
 - Lucide: https://github.com/lucide-icons/lucide (ISC, private-use range)
 
+## Developer switches
+
+These environment variables are read on the local machine. They do not send anything anywhere.
+
+| Variable | Effect |
+|---|---|
+| `WAFFLE_PAGE` | Starting page, 0 through 5 |
+| `WAFFLE_SELECT` | Preselect a library row by index |
+| `WAFFLE_SCRIPT` | Play a local UI script. The command list is in the comment at the top of `src/ui/main_win32.cpp` |
+| `WAFFLE_CAPTURE` | Save a BMP of the window on disk, then quit |
+| `WAFFLE_CAPTURE_SIZE` | Client size, written as `WIDTHxHEIGHT` |
+| `WAFFLE_CAPTURE_FRAMES` | Frames to draw before the capture |
+| `WAFFLE_TEST_MODEL` | GGUF path for tests that load a model |
+
 ## License
 
-MIT, like llama.cpp. The text is in `LICENSE` (copyright 2026 Anarchy). The fonts, if you redistribute them, keep their own license.
+Waffle Iron is MIT. The text is in `LICENSE` (copyright 2026 Anarchy). Third-party terms are in `THIRD_PARTY.md`. Optional fonts, if you add them under `assets/fonts/`, keep their own licenses.

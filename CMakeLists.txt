@@ -35,7 +35,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(unofficial-sqlite3 CONFIG REQUIRED)
-find_package(spdlog CONFIG REQUIRED)
 
 # --- Core: no UI dependency ------------------------------------------------
 add_library(waffle_core STATIC
@@ -50,7 +49,7 @@ add_library(waffle_core STATIC
   src/store/store.cpp
 )
 target_include_directories(waffle_core PUBLIC src)
-target_link_libraries(waffle_core PUBLIC llama ggml unofficial::sqlite3::sqlite3 spdlog::spdlog)
+target_link_libraries(waffle_core PUBLIC llama ggml unofficial::sqlite3::sqlite3)
 target_compile_definitions(waffle_core PUBLIC
   WAFFLE_VERSION="${PROJECT_VERSION}"
   WAFFLE_LLAMA_VERSION="${WAFFLE_LLAMA_VERSION}"

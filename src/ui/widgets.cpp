@@ -146,8 +146,7 @@ bool load_params_editor(LoadParams& p, int max_layers) {
     bool changed = false;
     const int top = std::max(max_layers, 1);
     int ngl = p.n_gpu_layers < 0 ? top : std::min(p.n_gpu_layers, top);
-    field_label("GPU layers",
-                "How many model layers are placed in VRAM. The maximum puts the whole model on the GPU.");
+    field_label("GPU layers", "How many model layers are placed in VRAM. The maximum puts the whole model on the GPU.");
     char ngl_label[48];
     if (ngl >= top)
         std::snprintf(ngl_label, sizeof ngl_label, "All (%d)", top);
@@ -207,7 +206,8 @@ bool load_params_editor(LoadParams& p, int max_layers) {
         });
     changed |= checkbox("Full SWA cache", &p.swa_full);
     help_marker("Sliding-window models (Gemma...): llama.cpp allocates those layers' cache for "
-                "the whole context by default. Unchecked, it is limited to the window and uses much less VRAM at long context.");
+                "the whole context by default. Unchecked, it is limited to the window and uses much less VRAM at long "
+                "context.");
     return changed;
 }
 
@@ -218,8 +218,8 @@ bool busy_indicator(const char* label, float fraction) {
         const float t = static_cast<float>(ImGui::GetTime());
         fraction = 0.5f + 0.5f * std::sin(t * 3.0f);
     }
-    ImGui::ProgressBar(std::clamp(fraction, 0.0f, 1.0f),
-                       ImVec2(-(button + ImGui::GetStyle().ItemSpacing.x), 0.0f), label);
+    ImGui::ProgressBar(std::clamp(fraction, 0.0f, 1.0f), ImVec2(-(button + ImGui::GetStyle().ItemSpacing.x), 0.0f),
+                       label);
     ImGui::SameLine();
     return ImGui::Button("Cancel", ImVec2(button, 0.0f));
 }
@@ -362,7 +362,8 @@ void meter(float fraction, const ImVec4& color, float width, float height) {
     const float r = height * .5f;
     dl->AddRectFilled(pos, {pos.x + width, pos.y + height}, ImGui::GetColorU32(ImVec4(1, 1, 1, .07f)), r);
     const float f = std::clamp(fraction, 0.0f, 1.0f);
-    if (f > 0) dl->AddRectFilled(pos, {pos.x + std::max(height, width * f), pos.y + height}, ImGui::GetColorU32(color), r);
+    if (f > 0)
+        dl->AddRectFilled(pos, {pos.x + std::max(height, width * f), pos.y + height}, ImGui::GetColorU32(color), r);
     ImGui::Dummy({width, height});
 }
 

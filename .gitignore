@@ -6,3 +6,7 @@
 *.user
 CMakeUserPresets.json
 *.log
+.env
+.env.*
+!.env.example
+imgui.ini

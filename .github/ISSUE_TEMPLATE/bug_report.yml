@@ -1,0 +1,52 @@
+name: Bug report
+description: A build failure, a crash, or a wrong result in Waffle Iron
+title: "Bug: "
+labels: []
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps
+      description: How to repeat it. Leave out private file paths when a short description of the model (architecture and quantization) is enough.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Waffle Iron version
+      description: The version and llama.cpp string from the About box, or the output of `waffle --help`.
+      placeholder: 0.1.0, llama.cpp …
+    validations:
+      required: true
+  - type: dropdown
+    id: build
+    attributes:
+      label: Build
+      options:
+        - CPU
+        - CUDA
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: Windows 11 24H2
+    validations:
+      required: true
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU
+      description: Name from the monitor, or "none" for a CPU-only machine. This is optional.
+      placeholder: none
+    validations:
+      required: false

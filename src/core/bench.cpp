@@ -251,7 +251,8 @@ std::string to_csv(const std::vector<BenchResult>& results) {
     std::ostringstream out;
     out.imbue(std::locale::classic());
     out << std::setprecision(12);
-    // Stable schema: identity, settings, sample count, means/standard deviations (tokens/s, ms), VRAM (bytes), provenance.
+    // Stable schema: identity, settings, sample count, means/standard deviations (tokens/s, ms), VRAM (bytes),
+    // provenance.
     out << "model,model_file_type,n_gpu_layers,n_ctx,type_k,type_v,flash_attn,n_ubatch,n_batch,n_threads,n_prompt,n_"
            "gen,repetitions,warmup,samples,pp_mean,pp_stddev,tg_mean,tg_stddev,ttft_mean_ms,ttft_stddev_ms,load_ms,"
            "vram_peak_bytes,gpu,llama_version,timestamp\n";

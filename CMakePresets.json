@@ -27,7 +27,7 @@
     {
       "name": "cuda-release",
       "inherits": "base",
-      "displayName": "CUDA, Release (RTX 4060 Ti, sm_89)",
+      "displayName": "CUDA, Release (sm_89)",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "WAFFLE_CUDA": "ON",

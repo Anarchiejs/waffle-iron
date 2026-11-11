@@ -34,7 +34,7 @@ class CompareView final : public View {
     uint32_t seed_ = 42;
     bool perplexity_ = false;
     bool has_result_ = false;
-    float metrics_h_ = 0; // height of the measurement card, updated every frame
+    float metrics_h_ = 0;        // height of the measurement card, updated every frame
     bool fold_settings_ = false; // folds the settings on launch, to leave room for the results
     CompareResult result_;
     Engine* engine_ = nullptr;
@@ -60,7 +60,7 @@ class CompareView final : public View {
             if (best) {
                 ImGui::PopStyleColor();
                 ImGui::SameLine();
-                badge("meilleur", col::good);
+                badge("best", col::good);
             }
         }
     }
@@ -154,7 +154,7 @@ class CompareView final : public View {
     }
     void output(AppContext& ctx, int i, const std::string& text, ImVec2 size) {
         ImGui::PushID(i);
-        if (begin_card("##sortie", size, ImGuiWindowFlags_NoScrollbar)) {
+        if (begin_card("##output", size, ImGuiWindowFlags_NoScrollbar)) {
             badge(i ? "B" : "A", side_color(i));
             ImGui::SameLine();
             const int index = models_[i];
@@ -173,7 +173,7 @@ class CompareView final : public View {
                     ImGui::PopStyleColor();
                 }
             }
-            ImGui::BeginChild("##texte", {0, 0}, ImGuiChildFlags_FrameStyle);
+            ImGui::BeginChild("##text", {0, 0}, ImGuiChildFlags_FrameStyle);
             if (text.empty())
                 ImGui::TextDisabled(future_.valid() ? "Waiting..." : "The model reply will appear here.");
             else
@@ -187,7 +187,8 @@ class CompareView final : public View {
     void metrics() {
         card_title("Measurements");
         if (!ImGui::BeginTable("measures AB", 3,
-                               ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingStretchSame))
+                               ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
+                                   ImGuiTableFlags_SizingStretchSame))
             return;
         ImGui::TableSetupColumn("Measurement");
         ImGui::TableSetupColumn("A");
@@ -201,8 +202,8 @@ class CompareView final : public View {
         metric("Prompt prefill", a.pp_tps, b.pp_tps, true, "tok/s", va && a.pp_tps > 0, vb && b.pp_tps > 0);
         metric("Generation", a.tg_tps, b.tg_tps, true, "tok/s", va && a.tg_tps > 0, vb && b.tg_tps > 0);
         metric("Load", a.load_ms, b.load_ms, false, "ms", va, vb);
-        metric("VRAM max", static_cast<double>(a.vram_peak) / MiB, static_cast<double>(b.vram_peak) / MiB, false,
-               "Mo", va && a.vram_peak > 0, vb && b.vram_peak > 0);
+        metric("VRAM max", static_cast<double>(a.vram_peak) / MiB, static_cast<double>(b.vram_peak) / MiB, false, "Mo",
+               va && a.vram_peak > 0, vb && b.vram_peak > 0);
         metric("Perplexity", a.perplexity.value_or(0), b.perplexity.value_or(0), false, "",
                va && a.perplexity.has_value(), vb && b.perplexity.has_value());
         metric("Generated tokens", a.n_generated, b.n_generated, true, "tokens", va, vb);
@@ -259,7 +260,7 @@ public:
             if (begin_card("##Trial", {side_width(.27f, 19, 24), avail.y})) common(ctx);
             end_card();
             ImGui::SameLine(0, gap);
-            ImGui::BeginChild("##Duel", {0, avail.y}, ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+            ImGui::BeginChild("##Compare", {0, avail.y}, ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
         } else {
             if (begin_card("##Trial")) common(ctx);
             end_card();
@@ -289,7 +290,8 @@ public:
             ImGui::EndDisabled();
         }
         // Height of the measurement card measured on the previous frame (an estimate on the first).
-        const float metrics_h = has_result_ ? (metrics_h_ > 0 ? metrics_h_ : em(17)) + ImGui::GetStyle().ItemSpacing.y : 0;
+        const float metrics_h =
+            has_result_ ? (metrics_h_ > 0 ? metrics_h_ : em(17)) + ImGui::GetStyle().ItemSpacing.y : 0;
         const float out_h = std::max(em(12), ImGui::GetContentRegionAvail().y - metrics_h);
         for (int i = 0; i < 2; ++i) {
             if (i && two) ImGui::SameLine(0, gap);

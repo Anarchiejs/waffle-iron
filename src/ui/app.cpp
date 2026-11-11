@@ -121,19 +121,19 @@ void App::sidebar(float width, float height, bool compact) {
                     ImGui::GetColorU32(col::text), "WI");
         if (compact) {
             ImGui::SetCursorScreenPos(p);
-            if (ImGui::InvisibleButton("##marque", {s, s})) about_ = true;
+            if (ImGui::InvisibleButton("##mark", {s, s})) about_ = true;
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("About Waffle Iron");
             ImGui::SetCursorScreenPos(pos);
         }
         if (!compact)
-            dl->AddText(fonts().semibold, em(1.1f), {p.x + s + em(.7f), p.y - em(.05f)},
-                        ImGui::GetColorU32(col::text), "Waffle Iron");
+            dl->AddText(fonts().semibold, em(1.1f), {p.x + s + em(.7f), p.y - em(.05f)}, ImGui::GetColorU32(col::text),
+                        "Waffle Iron");
         char version[96];
         std::snprintf(version, sizeof version, "v%s  ·  llama.cpp %s", WAFFLE_VERSION, WAFFLE_LLAMA_VERSION);
         const ImVec4 clip{pos.x, pos.y, pos.x + width - em(1), pos.y + s + 4};
         if (!compact)
-            dl->AddText(fonts().regular, em(.78f), {p.x + s + em(.7f), p.y + em(1.25f)},
-                        ImGui::GetColorU32(col::dim), version, nullptr, 0, &clip);
+            dl->AddText(fonts().regular, em(.78f), {p.x + s + em(.7f), p.y + em(1.25f)}, ImGui::GetColorU32(col::dim),
+                        version, nullptr, 0, &clip);
         ImGui::Dummy({0, s + em(.9f)});
     }
     if (!compact) {
@@ -181,7 +181,7 @@ void App::sidebar(float width, float height, bool compact) {
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {em(.85f), em(.75f)});
         ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, em(.6f));
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {em(.5f), em(.32f)});
-        ImGui::BeginChild("##CarteGPU", {0, card_h - em(1.6f)}, ImGuiChildFlags_Borders,
+        ImGui::BeginChild("##GpuCard", {0, card_h - em(1.6f)}, ImGuiChildFlags_Borders,
                           ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
         push_font(fonts().semibold, .86f);
         const auto name = telemetry_.device_name();
@@ -201,7 +201,7 @@ void App::sidebar(float width, float height, bool compact) {
             ImGui::PopFont();
         } else {
             push_font(nullptr, .84f);
-            dim_wrapped(telemetry_.available() ? "Sampling..." : "NVML indisponible");
+            dim_wrapped(telemetry_.available() ? "Sampling..." : "NVML unavailable");
             ImGui::PopFont();
         }
         ImGui::EndChild();
@@ -277,12 +277,13 @@ void App::toasts(const ImVec2& corner) {
         ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(.115f, .125f, .155f, 1));
         std::string name = "##Toast" + std::to_string(id++);
         ImGui::Begin(name.c_str(), nullptr,
-                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoDocking |
-                         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoFocusOnAppearing |
-                         ImGuiWindowFlags_NoNav);
+                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoInputs |
+                         ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav);
         const ImVec2 p = ImGui::GetWindowPos();
         const float h = ImGui::GetWindowHeight();
-        ImGui::GetWindowDrawList()->AddRectFilled({p.x + em(.35f), p.y + em(.55f)}, {p.x + em(.55f), p.y + h - em(.55f)},
+        ImGui::GetWindowDrawList()->AddRectFilled({p.x + em(.35f), p.y + em(.55f)},
+                                                  {p.x + em(.55f), p.y + h - em(.55f)},
                                                   ImGui::GetColorU32(it->error ? col::bad : col::accent), em(.1f));
         ImGui::PushTextWrapPos(em(24));
         ImGui::TextUnformatted(it->text.c_str());
@@ -338,7 +339,8 @@ void App::frame() {
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {0, 0});
     ImGui::Begin("##Waffle Iron", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus |
-                     ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollWithMouse);
+                     ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoSavedSettings |
+                     ImGuiWindowFlags_NoScrollWithMouse);
     ImGui::PopStyleVar(2);
     const float status_h = em(1.95f);
     const float body_h = vp->WorkSize.y - status_h;
@@ -352,7 +354,7 @@ void App::frame() {
     auto& view = *views_[static_cast<size_t>(page_)];
     ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0, 0, 0, 0));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {em(1.6f), em(1.2f)});
-    ImGui::BeginChild("##Principal", {0, body_h}, ImGuiChildFlags_AlwaysUseWindowPadding,
+    ImGui::BeginChild("##Main", {0, body_h}, ImGuiChildFlags_AlwaysUseWindowPadding,
                       ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
     ImGui::PopStyleVar();
     {
@@ -412,6 +414,10 @@ void App::frame() {
         ImGui::PushTextWrapPos(em(26));
         ImGui::TextUnformatted("Understand, measure, and tune local models on your GPU.");
         ImGui::PopTextWrapPos();
+        ImGui::Dummy({0, em(.35f)});
+        ImGui::TextUnformatted("MIT License. Copyright 2026 Anarchy.");
+        ImGui::TextWrapped("Built on llama.cpp, Dear ImGui, and ImPlot. Full terms are in THIRD_PARTY.md.");
+        ImGui::TextWrapped("No network. GPU readings stay on this machine.");
         ImGui::Dummy({0, em(.3f)});
         ImGui::PushStyleColor(ImGuiCol_Text, col::dim);
         ImGui::TextUnformatted("Shortcuts: Ctrl+1 through Ctrl+6 switch pages, Ctrl+R rescans models.");

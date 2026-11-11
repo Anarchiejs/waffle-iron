@@ -43,8 +43,8 @@ std::optional<OllamaBlob> find_ollama_blob(const std::filesystem::path& path) {
     static const std::regex media(R"re("mediaType"\s*:\s*"([^"]*)")re");
     static const std::regex sha(R"re("digest"\s*:\s*"sha256:([0-9a-fA-F]+)")re");
     std::optional<OllamaBlob> found;
-    std::filesystem::recursive_directory_iterator it(manifests, std::filesystem::directory_options::skip_permission_denied,
-                                                     ec),
+    std::filesystem::recursive_directory_iterator it(manifests,
+                                                     std::filesystem::directory_options::skip_permission_denied, ec),
         end;
     for (; it != end; it.increment(ec)) {
         if (ec || !it->is_regular_file(ec)) continue;
@@ -58,8 +58,7 @@ std::optional<OllamaBlob> find_ollama_blob(const std::filesystem::path& path) {
             if (!std::regex_search(object, d, sha) || d[1].str() != digest) continue;
             if (!found) found.emplace();
             const auto tag = ollama_tag(std::filesystem::relative(it->path(), manifests, ec));
-            if (found->tags.find(tag) == std::string::npos)
-                found->tags += (found->tags.empty() ? "" : ", ") + tag;
+            if (found->tags.find(tag) == std::string::npos) found->tags += (found->tags.empty() ? "" : ", ") + tag;
             if (std::regex_search(object, m, media) && m[1].str().ends_with(".model")) found->model = true;
         }
     }

@@ -4,11 +4,10 @@
   "builtin-baseline": "0e5030f583a5427123cd3b714255e5ae62faa3ba",
   "dependencies": [
     "sqlite3",
-    "spdlog",
     "catch2",
     {
       "name": "imgui",
-      "features": ["docking-experimental", "dx11-binding", "win32-binding"],
+      "features": ["dx11-binding", "win32-binding"],
       "platform": "windows"
     },
     {

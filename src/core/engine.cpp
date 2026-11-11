@@ -161,11 +161,10 @@ const LoadedModel& EngineSession::load(const LoadParams& params, const ProgressF
     if (!ctx_) {
         const std::string details = take_recent_errors();
         unload();
-        throw Error(
-            "Cannot create the context (" + std::to_string(params.n_ctx) + " tokens, cache " + params.type_k +
-            "/" + params.type_v +
-            "): insufficient memory or incompatible setting (a quantized V cache requires flash attention)." +
-            (details.empty() ? "" : "\nDetail: " + details));
+        throw Error("Cannot create the context (" + std::to_string(params.n_ctx) + " tokens, cache " + params.type_k +
+                    "/" + params.type_v +
+                    "): insufficient memory or incompatible setting (a quantized V cache requires flash attention)." +
+                    (details.empty() ? "" : "\nDetail: " + details));
     }
 
     auto info = std::make_unique<LoadedModel>();

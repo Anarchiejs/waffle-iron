@@ -30,7 +30,7 @@ bool shot_requested = false;
 std::string shot_path;
 // Test script (development): WAFFLE_SCRIPT=<file>, one command per line, played frame by frame by
 // injecting events straight into ImGui (independent of the real cursor):
-//   wait <images> | click <x> <y> | move <x> <y> | scroll <x> <y> <crans> | type <texte> | key enter|backspace|ctrl+a
+//   wait <frames> | click <x> <y> | move <x> <y> | scroll <x> <y> <steps> | type <text> | key enter|backspace|ctrl+a
 //   shot <file.bmp> | quit
 struct Script {
     std::vector<std::string> lines;
@@ -105,7 +105,9 @@ void step_script(Script& sc, ImGuiIO& io) {
                 i.AddKeyEvent(ImGuiMod_Ctrl, false);
             });
         } else {
-            const ImGuiKey key = k == "enter" ? ImGuiKey_Enter : k == "backspace" ? ImGuiKey_Backspace : ImGuiKey_Escape;
+            const ImGuiKey key = k == "enter"       ? ImGuiKey_Enter
+                                 : k == "backspace" ? ImGuiKey_Backspace
+                                                    : ImGuiKey_Escape;
             io.AddKeyEvent(key, true);
             sc.pending.push_back([key](ImGuiIO& i) { i.AddKeyEvent(key, false); });
         }
@@ -194,7 +196,8 @@ bool save_backbuffer_bmp(const char* path) {
                 std::fwrite(&ih, sizeof ih, 1, f);
                 std::vector<unsigned char> row(static_cast<size_t>(w) * 4);
                 for (int y = 0; y < h; ++y) {
-                    const auto* src = static_cast<const unsigned char*>(map.pData) + static_cast<size_t>(y) * map.RowPitch;
+                    const auto* src =
+                        static_cast<const unsigned char*>(map.pData) + static_cast<size_t>(y) * map.RowPitch;
                     for (int x = 0; x < w; ++x) { // RGBA -> BGRA
                         row[x * 4 + 0] = src[x * 4 + 2];
                         row[x * 4 + 1] = src[x * 4 + 1];
@@ -304,8 +307,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int show) {
                     release_target();
                     hr = swap_chain->ResizeBuffers(0, resize_width, resize_height, DXGI_FORMAT_UNKNOWN, 0);
                     resize_width = resize_height = 0;
-                    if (FAILED(hr) || !create_target())
-                        throw std::runtime_error("Cannot resize DirectX");
+                    if (FAILED(hr) || !create_target()) throw std::runtime_error("Cannot resize DirectX");
                 }
                 const float next_dpi = ImGui_ImplWin32_GetDpiScaleForHwnd(hwnd);
                 if (next_dpi > 0 && next_dpi != current_dpi) {

@@ -288,10 +288,10 @@ function Invoke-InstallSelfTest {
     $none = Select-InstallPlan $false $false '' $false @() @()
     Assert-Plan 'nothing' $none $true 'cpu' 'cpu-release' '' '*No NVIDIA GPU*'
 
-    $gpuOnly = Select-InstallPlan $false $false '' $false @('89') @('RTX 4060 Ti (sm_89)')
+    $gpuOnly = Select-InstallPlan $false $false '' $false @('89') @('Ada sample (sm_89)')
     Assert-Plan 'gpu without toolkit' $gpuOnly $true 'cpu' 'cpu-release' '' '*CUDA Toolkit*'
 
-    $cuda = Select-InstallPlan $false $false '' $true @('89') @('RTX 4060 Ti (sm_89)')
+    $cuda = Select-InstallPlan $false $false '' $true @('89') @('Ada sample (sm_89)')
     Assert-Plan 'cuda 89' $cuda $true 'cuda' 'cuda-release-local' '89' '*sm_89*'
     Assert-Equal 'cuda write' ([string]$cuda.WriteUserPreset) ([string]$true)
     Assert-Equal 'cuda exe' $cuda.ExeRelative 'build\cuda-release-local\WaffleIron.exe'
@@ -331,13 +331,13 @@ function Invoke-InstallSelfTest {
     $toolkitOnly = Select-InstallPlan $false $false '' $true @() @()
     Assert-Plan 'toolkit only' $toolkitOnly $true 'cpu' 'cpu-release' '' '*sm_89*'
 
-    $json = New-CudaUserPresetJson -ArchitectureText '86;89' -Summary 'RTX "4060"'
+    $json = New-CudaUserPresetJson -ArchitectureText '86;89' -Summary 'GPU "Ada"'
     $parsed = $json | ConvertFrom-Json
     Assert-Equal 'json name' $parsed.configurePresets[0].name 'cuda-release-local'
     Assert-Equal 'json arch' $parsed.configurePresets[0].cacheVariables.CMAKE_CUDA_ARCHITECTURES '86;89'
     Assert-Equal 'json bin missing' $parsed.configurePresets[0].PSObject.Properties['binaryDir'] $null
     Assert-Equal 'json inherits' $parsed.configurePresets[0].inherits 'cuda-release'
-    Assert-True 'json quote' ($parsed.configurePresets[0].displayName -like '*RTX "4060"*')
+    Assert-True 'json quote' ($parsed.configurePresets[0].displayName -like '*GPU "Ada"*')
     $vendor = $parsed.vendor.PSObject.Properties['waffle.iron/install/1.0'].Value
     Assert-True 'json vendor' ($vendor.generated -eq $true)
     Assert-True 'json marker' ($json.Contains('waffle.iron/install/1.0'))

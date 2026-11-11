@@ -108,8 +108,7 @@ std::vector<Candidate> SamplerLab::candidates(EngineSession& session, const Samp
 int SamplerLab::step(EngineSession& session, const SamplerSettings& settings, std::optional<int32_t> forced) {
     require_node(nodes_, current_);
     session.throw_if_stopped();
-    if (current_ != 0 && session.is_eog(nodes_[current_].token))
-        throw Error("Cannot step past end of generation");
+    if (current_ != 0 && session.is_eog(nodes_[current_].token)) throw Error("Cannot step past end of generation");
     if (prompt_tokens_.size() + kv_tokens_.size() >= session.info().n_ctx) throw Error("Lab context is full");
     if (logits_.size() != static_cast<size_t>(session.n_vocab())) throw Error("Lab model changed");
     if (forced && (*forced < 0 || *forced >= session.n_vocab())) throw Error("Forced token is outside the vocabulary");

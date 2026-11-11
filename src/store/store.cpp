@@ -22,14 +22,14 @@
 #include <windows.h>
 #endif
 
-namespace banc {
+namespace waffle {
 
 namespace {
 
-// Le message d'erreur vu par l'utilisateur reprend toujours sqlite3_errmsg.
+// The error message shown to the user always includes sqlite3_errmsg.
 [[noreturn]] void fail(sqlite3* db) {
     const char* msg = db ? sqlite3_errmsg(db) : nullptr;
-    throw Error(std::string("Base de données : ") + (msg ? msg : "erreur inconnue"));
+    throw Error(std::string("Database: ") + (msg ? msg : "unknown error"));
 }
 
 void exec_sql(sqlite3* db, const char* sql) {
@@ -37,7 +37,7 @@ void exec_sql(sqlite3* db, const char* sql) {
     if (sqlite3_exec(db, sql, nullptr, nullptr, &err) != SQLITE_OK) {
         std::string msg = err ? err : sqlite3_errmsg(db);
         sqlite3_free(err);
-        throw Error("Base de données : " + msg);
+        throw Error("Database: " + msg);
     }
 }
 
@@ -83,7 +83,7 @@ std::vector<int> split_ints(const std::string& text) {
     return out;
 }
 
-// Énoncé préparé : finalisé même si une étape lève.
+// Prepared statement: finalized even if a step throws.
 class Stmt {
 public:
     Stmt(sqlite3* db, const char* sql) : db_(db) {
@@ -110,7 +110,7 @@ public:
         sqlite3_clear_bindings(stmt_);
     }
 
-    // SQLITE_ROW -> true, SQLITE_DONE -> false, sinon Error.
+    // SQLITE_ROW -> true, SQLITE_DONE -> false, otherwise Error.
     bool step() {
         const int rc = sqlite3_step(stmt_);
         if (rc == SQLITE_ROW) return true;
@@ -154,7 +154,7 @@ int user_version(sqlite3* db) {
     return query.integer(0);
 }
 
-// Schéma v1. Les versions déjà appliquées ne sont pas rejouées.
+// Schema v1. Versions already applied are not replayed.
 void migrate(sqlite3* db) {
     if (user_version(db) >= 1) return;
 
@@ -302,7 +302,7 @@ ModelRecord read_model_row(sqlite3* db, Stmt& stmt) {
 void require_model(sqlite3* db, const std::string& path) {
     Stmt query(db, "SELECT 1 FROM models WHERE path = ?1");
     query.bind_text(1, path);
-    if (!query.step()) throw Error("Modèle inconnu : " + path);
+    if (!query.step()) throw Error("Unknown model: " + path);
 }
 
 } // namespace
@@ -312,16 +312,16 @@ Store::Store(const std::filesystem::path& db_path) {
     if (!parent.empty()) {
         std::error_code ec;
         std::filesystem::create_directories(parent, ec);
-        if (ec) throw Error("Base de données : impossible de créer le dossier " + parent.string());
+        if (ec) throw Error("Database: Cannot create directory " + parent.string());
     }
 
     const int rc =
         sqlite3_open_v2(utf8_from_path(db_path).c_str(), &db_, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nullptr);
     if (rc != SQLITE_OK || !db_) {
-        std::string msg = db_ ? sqlite3_errmsg(db_) : "ouverture impossible";
+        std::string msg = db_ ? sqlite3_errmsg(db_) : "Cannot open";
         if (db_) sqlite3_close(db_);
         db_ = nullptr;
-        throw Error("Base de données : " + msg);
+        throw Error("Database: " + msg);
     }
 
     try {
@@ -354,14 +354,14 @@ std::filesystem::path Store::default_path() {
         }
     }
     if (dir.empty()) dir = std::filesystem::temp_directory_path();
-    dir /= "BancLocal";
+    dir /= "WaffleIron";
 #else
     const char* home = std::getenv("HOME");
-    std::filesystem::path dir = home && *home ? std::filesystem::path(home) / ".local" / "share" / "BancLocal"
-                                              : std::filesystem::temp_directory_path() / "BancLocal";
+    std::filesystem::path dir = home && *home ? std::filesystem::path(home) / ".local" / "share" / "WaffleIron"
+                                              : std::filesystem::temp_directory_path() / "WaffleIron";
 #endif
     std::filesystem::create_directories(dir);
-    return dir / "banc.db";
+    return dir / "waffle.db";
 }
 
 void Store::upsert_model(const ModelInfo& info) {
@@ -577,7 +577,7 @@ std::vector<BenchResult> Store::load_campaign(int64_t id) const {
     std::lock_guard lock(mutex_);
     Stmt exists(db_, "SELECT 1 FROM campaigns WHERE id = ?1");
     exists.bind_int64(1, id);
-    if (!exists.step()) throw Error("Campagne introuvable : " + std::to_string(id));
+    if (!exists.step()) throw Error("Campaign not found: " + std::to_string(id));
 
     Stmt results(db_, R"SQL(
 SELECT id, model_name, model_file_type, load_ms, vram_peak, gpu_name, llama_version, timestamp,
@@ -642,7 +642,7 @@ void Store::delete_campaign(int64_t id) {
     Stmt stmt(db_, "DELETE FROM campaigns WHERE id = ?1");
     stmt.bind_int64(1, id);
     stmt.step();
-    if (sqlite3_changes(db_) == 0) throw Error("Campagne introuvable : " + std::to_string(id));
+    if (sqlite3_changes(db_) == 0) throw Error("Campaign not found: " + std::to_string(id));
 }
 
 std::vector<HistoryPoint> Store::history(const std::string& model_path) const {
@@ -712,4 +712,4 @@ FROM vram_checks WHERE model_path = ?1 ORDER BY timestamp, id
     return checks;
 }
 
-} // namespace banc
+} // namespace waffle

@@ -1,5 +1,5 @@
-// Types partagés par tous les modules du cœur. Fichier possédé par Claude :
-// les lots notent leurs besoins de champs dans leur rapport au lieu de le modifier.
+// Shared types for every core module.
+// Other modules record the fields they need in their own notes instead of editing this file.
 #pragma once
 
 #include <cstdint>
@@ -12,20 +12,20 @@
 #include <utility>
 #include <vector>
 
-namespace banc {
+namespace waffle {
 
-// Erreur « attendue » (fichier illisible, mémoire insuffisante, modèle corrompu…) :
-// son message est montré tel quel à l'utilisateur, donc en français et précis.
+// Expected error (unreadable file, insufficient memory, corrupt model, …):
+// the message is shown to the user as-is, so keep it precise.
 struct Error : std::runtime_error {
     using std::runtime_error::runtime_error;
 };
 
-// Levée quand un travail est annulé (Engine::cancel_all ou stop_token).
+// Thrown when a job is cancelled (Engine::cancel_all or stop_token).
 struct Cancelled : Error {
-    Cancelled() : Error("Opération annulée") {}
+    Cancelled() : Error("Operation cancelled") {}
 };
 
-// Avancement : fraction 0..1 et libellé court. Retourne false pour demander l'annulation.
+// Progress: fraction 0..1 and a short label. Return false to request cancellation.
 using ProgressFn = std::function<bool(float fraction, const std::string& label)>;
 
 constexpr uint64_t KiB = 1024;
@@ -33,15 +33,15 @@ constexpr uint64_t MiB = 1024 * KiB;
 constexpr uint64_t GiB = 1024 * MiB;
 
 // ---------------------------------------------------------------------------
-// Métadonnées GGUF (lot L1)
+// GGUF metadata
 // ---------------------------------------------------------------------------
 struct TensorInfo {
     std::string name;
-    std::string type;           // nom ggml : "q4_K", "f16", "f32"…
+    std::string type;           // ggml name: "q4_K", "f16", "f32"…
     std::vector<int64_t> shape; // ne[0..n_dims)
     uint64_t n_elements = 0;
     uint64_t n_bytes = 0;
-    int layer = -1; // indice extrait de "blk.<n>." ; -1 = hors couche
+    int layer = -1; // index parsed from "blk.<n>." ; -1 = not a layer
 };
 
 struct ModelInfo {
@@ -50,55 +50,55 @@ struct ModelInfo {
     uint64_t file_size = 0;
 
     std::string architecture;                 // general.architecture
-    std::string name;                         // general.name, sinon nom de fichier sans extension
-    std::string file_type;                    // "Q4_K_M", "F16"… (general.file_type traduit), "?" si absent
-    uint64_t n_params = 0;                    // somme des éléments des tenseurs
+    std::string name;                         // general.name, otherwise the file name without extension
+    std::string file_type;                    // "Q4_K_M", "F16"… (translated general.file_type), "?" if missing
+    uint64_t n_params = 0;                    // sum of tensor elements
     uint32_t context_length = 0;              // <arch>.context_length
     uint32_t n_layer = 0;                     // <arch>.block_count
     uint32_t n_embd = 0;                      // <arch>.embedding_length
     uint32_t n_head = 0;                      // <arch>.attention.head_count
-    uint32_t n_head_kv = 0;                   // <arch>.attention.head_count_kv (défaut n_head)
-    uint32_t head_dim_k = 0;                  // <arch>.attention.key_length (défaut n_embd / n_head)
-    uint32_t head_dim_v = 0;                  // <arch>.attention.value_length (défaut n_embd / n_head)
-    uint32_t sliding_window = 0;              // <arch>.attention.sliding_window (0 = aucune)
-    // Une valeur par couche, 1 = attention à fenêtre glissante (<arch>.attention.sliding_window_pattern,
-    // tableau ou période) ; vide si le modèle n'a pas de SWA.
+    uint32_t n_head_kv = 0;                   // <arch>.attention.head_count_kv (default n_head)
+    uint32_t head_dim_k = 0;                  // <arch>.attention.key_length (default n_embd / n_head)
+    uint32_t head_dim_v = 0;                  // <arch>.attention.value_length (default n_embd / n_head)
+    uint32_t sliding_window = 0;              // <arch>.attention.sliding_window (0 = none)
+    // One value per layer, 1 = sliding-window attention (<arch>.attention.sliding_window_pattern,
+    // array or period); empty if the model has no SWA.
     std::vector<uint8_t> swa_layers;
-    uint32_t head_dim_k_swa = 0;   // <arch>.attention.key_length_swa (défaut head_dim_k)
-    uint32_t head_dim_v_swa = 0;   // <arch>.attention.value_length_swa (défaut head_dim_v)
-    uint32_t shared_kv_layers = 0; // <arch>.attention.shared_kv_layers : les dernières couches réutilisent le cache
+    uint32_t head_dim_k_swa = 0;   // <arch>.attention.key_length_swa (default head_dim_k)
+    uint32_t head_dim_v_swa = 0;   // <arch>.attention.value_length_swa (default head_dim_v)
+    uint32_t shared_kv_layers = 0; // <arch>.attention.shared_kv_layers: the last layers reuse the cache
     uint32_t n_expert = 0;                    // <arch>.expert_count (0 = dense)
     uint32_t n_expert_used = 0;               // <arch>.expert_used_count
     std::optional<std::string> chat_template; // tokenizer.chat_template
 
-    std::map<std::string, uint64_t> bytes_by_type;             // type ggml -> octets cumulés
-    std::vector<TensorInfo> tensors;                           // vide si lu sans tenseurs
-    std::vector<std::pair<std::string, std::string>> metadata; // clé -> valeur lisible (tableaux résumés)
+    std::map<std::string, uint64_t> bytes_by_type;             // ggml type -> total bytes
+    std::vector<TensorInfo> tensors;                           // empty if read without tensors
+    std::vector<std::pair<std::string, std::string>> metadata; // key -> readable value (arrays summarized)
 };
 
 // ---------------------------------------------------------------------------
-// Chargement d'un modèle par le moteur
+// Model load by the engine
 // ---------------------------------------------------------------------------
 struct LoadParams {
     std::filesystem::path model_path;
-    int n_gpu_layers = -1; // -1 = toutes les couches sur GPU
+    int n_gpu_layers = -1; // -1 = every layer on the GPU
     uint32_t n_ctx = 4096;
     uint32_t n_batch = 2048;
     uint32_t n_ubatch = 512;
-    std::string type_k = "f16"; // type ggml du cache K
-    std::string type_v = "f16"; // type ggml du cache V (quantifié => flash attention requise)
-    int flash_attn = -1;        // -1 auto, 0 non, 1 oui
-    int n_threads = 0;          // 0 = automatique
+    std::string type_k = "f16"; // ggml type of the K cache
+    std::string type_v = "f16"; // ggml type of the V cache (quantized => flash attention required)
+    int flash_attn = -1;        // -1 auto, 0 off, 1 on
+    int n_threads = 0;          // 0 = automatic
     uint32_t n_seq_max = 1;
-    // Cache SWA de la taille du contexte (défaut de llama.cpp). false = seulement la fenêtre + un micro-lot :
-    // beaucoup moins de VRAM sur les longs contextes, mais revenir en arrière dans la séquence est impossible.
+    // SWA cache sized to the context (llama.cpp default). false = only the window plus one micro-batch:
+    // much less VRAM on long contexts, but rewinding the sequence is impossible.
     bool swa_full = true;
 
     bool operator==(const LoadParams&) const = default;
 };
 
 // ---------------------------------------------------------------------------
-// Planificateur de VRAM (lot L1)
+// VRAM planner
 // ---------------------------------------------------------------------------
 struct VramPlanInput {
     int n_gpu_layers = -1;
@@ -117,20 +117,20 @@ struct VramEstimate {
     uint64_t weights_cpu = 0;
     uint64_t kv_cache_gpu = 0;
     uint64_t kv_cache_cpu = 0;
-    uint64_t compute_gpu = 0; // tampons de calcul
+    uint64_t compute_gpu = 0; // compute buffers
     uint64_t compute_cpu = 0;
-    uint64_t overhead_gpu = 0;      // contexte CUDA, cuBLAS… (constante calibrée)
-    std::vector<std::string> notes; // hypothèses, avertissements (SWA, MoE…)
+    uint64_t overhead_gpu = 0;      // CUDA context, cuBLAS… (calibrated constant)
+    std::vector<std::string> notes; // assumptions and warnings (SWA, MoE…)
 
     uint64_t total_gpu() const { return weights_gpu + kv_cache_gpu + compute_gpu + overhead_gpu; }
     uint64_t total_cpu() const { return weights_cpu + kv_cache_cpu + compute_cpu; }
 };
 
 // ---------------------------------------------------------------------------
-// Télémétrie GPU (lot L3)
+// GPU telemetry
 // ---------------------------------------------------------------------------
 struct GpuSample {
-    double t_seconds = 0; // secondes depuis la création de Telemetry
+    double t_seconds = 0; // seconds since Telemetry was created
     uint32_t gpu_util_pct = 0;
     uint32_t mem_util_pct = 0;
     uint64_t vram_used = 0;
@@ -141,27 +141,27 @@ struct GpuSample {
 };
 
 // ---------------------------------------------------------------------------
-// Banc d'essai (lot L2)
+// Benchmark
 // ---------------------------------------------------------------------------
 struct BenchConfig {
     LoadParams load;
-    uint32_t n_prompt = 512; // tokens de consigne mesurés (pp)
-    uint32_t n_gen = 128;    // tokens générés mesurés (tg)
+    uint32_t n_prompt = 512; // prompt tokens measured (pp)
+    uint32_t n_gen = 128;    // generated tokens measured (tg)
     int repetitions = 5;
-    int warmup = 1; // exécutions jetées avant les mesures
+    int warmup = 1; // discarded runs before measurement
 };
 
 struct BenchSample {
-    double pp_tps = 0;      // lecture de la consigne, tokens/s
-    double tg_tps = 0;      // génération, tokens/s
-    double ttft_ms = 0;     // temps jusqu'au premier token (consigne + 1 token)
-    uint64_t vram_peak = 0; // octets, 0 si inconnu
+    double pp_tps = 0;      // prompt processing, tokens/s
+    double tg_tps = 0;      // generation, tokens/s
+    double ttft_ms = 0;     // time to first token (prompt + 1 token)
+    uint64_t vram_peak = 0; // bytes, 0 if unknown
 };
 
 struct Stats {
     int n = 0;
     double mean = 0, stddev = 0, median = 0, min = 0, max = 0;
-    std::vector<int> outliers; // indices des valeurs aberrantes (score z modifié > 3.5)
+    std::vector<int> outliers; // indices of outliers (modified z-score > 3.5)
 };
 
 struct BenchResult {
@@ -173,8 +173,8 @@ struct BenchResult {
     Stats pp, tg, ttft;
     uint64_t vram_peak = 0;
     std::string gpu_name;
-    std::string llama_version; // BANC_LLAMA_VERSION
+    std::string llama_version; // WAFFLE_LLAMA_VERSION
     std::string timestamp;     // ISO 8601 UTC
 };
 
-} // namespace banc
+} // namespace waffle

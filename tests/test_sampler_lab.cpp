@@ -9,10 +9,10 @@
 #include <numeric>
 #include <set>
 
-using namespace banc;
+using namespace waffle;
 using Catch::Approx;
 
-TEST_CASE("sampler_lab : état initial et indices invalides", "[sampler_lab]") {
+TEST_CASE("sampler_lab: initial state and invalid indices", "[sampler_lab]") {
     SamplerLab lab;
     CHECK_FALSE(lab.started());
     CHECK(lab.nodes().empty());
@@ -20,8 +20,8 @@ TEST_CASE("sampler_lab : état initial et indices invalides", "[sampler_lab]") {
     CHECK_THROWS_AS(lab.text_to(-1), Error);
 }
 
-TEST_CASE("sampler_lab : probabilités, branches, restauration et EOG", "[sampler_lab][model]") {
-    BANC_REQUIRE_MODEL(model);
+TEST_CASE("sampler_lab: probabilities, branches, restore, and EOG", "[sampler_lab][model]") {
+    WAFFLE_REQUIRE_MODEL(model);
     Engine engine;
     engine
         .submit([&](EngineSession& s) {
@@ -108,10 +108,10 @@ TEST_CASE("sampler_lab : probabilités, branches, restauration et EOG", "[sample
                 CHECK(restored[i].token == a_logits[i].token);
                 CHECK(restored[i].logit == Approx(a_logits[i].logit).margin(1e-3));
             }
-            // Revenir à un ancêtre exige aussi de restaurer ses logits.
+            // Returning to an ancestor must also restore its logits.
             const auto depth_two = lab.step(s, settings, non_eog[1]);
             CHECK(lab.text_to(depth_two) == piece_a + s.token_to_piece(non_eog[1]));
-            // Sans filtre ni température, une pénalité de présence de 2 multiplie les rapports par exp(-2).
+            // With no filter and no temperature, a presence penalty of 2 multiplies the ratios by exp(-2).
             auto penalized = settings;
             penalized.top_k = 0;
             penalized.temperature = 1;

@@ -4,7 +4,7 @@ cd /d "%~dp0"
 chcp 65001 >nul
 where powershell >nul 2>&1
 if errorlevel 1 (
-  echo PowerShell est introuvable. Windows PowerShell 5.1 fait partie de Windows.
+  echo PowerShell was not found. Windows PowerShell 5.1 is part of Windows.
   goto :fail
 )
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\install.ps1" %*

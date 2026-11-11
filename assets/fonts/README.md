@@ -1,11 +1,11 @@
-# Polices facultatives
+# Optional fonts
 
-Placer ici `Inter-Regular.ttf` et `Inter-SemiBold.ttf` depuis le projet officiel
-Inter : https://github.com/rsms/inter (licence SIL Open Font License 1.1).
+Place `Inter-Regular.ttf` and `Inter-SemiBold.ttf` here, from the official
+Inter project: https://github.com/rsms/inter (SIL Open Font License 1.1).
 
-Pour les icônes, placer `lucide.ttf` depuis https://github.com/lucide-icons/lucide
-(licence ISC ; plage privée E000–F8FF). Respecter la licence de la distribution
-de police choisie et conserver ses mentions lors d'une redistribution.
+For icons, place `lucide.ttf` from https://github.com/lucide-icons/lucide
+(ISC license; private-use range E000–F8FF). Follow the license of the font
+build you choose and keep its notices if you redistribute it.
 
-Sans ces fichiers, Banc Local utilise la police intégrée d'ImGui. Aucun
-téléchargement automatique n'est effectué.
+Without these files, Waffle Iron uses ImGui's built-in font. Nothing is
+downloaded automatically.

@@ -1,6 +1,6 @@
-// État partagé par toutes les vues de l'interface. Fichier possédé par Claude.
-// Tout est lu et écrit sur le thread de l'interface ; les calculs longs passent par Engine
-// (std::future) ou par std::async pour ce qui ne touche pas llama.cpp (scan GGUF, campagne).
+// State shared by every interface view.
+// Everything is read and written on the interface thread; long work goes through Engine
+// (std::future) or std::async for work that does not touch llama.cpp (GGUF scan, campaign).
 #pragma once
 
 #include "core/engine.hpp"
@@ -14,7 +14,7 @@
 #include <string>
 #include <vector>
 
-namespace banc::ui {
+namespace waffle::ui {
 
 struct Toast {
     std::string text;
@@ -27,21 +27,21 @@ struct AppContext {
     Telemetry& telemetry;
     Store& store;
 
-    // Bibliothèque : remplie par la vue Bibliothèque (scan + Store), lue par les autres vues.
+    // Library: filled by the Library view (scan + Store), read by the other views.
     std::vector<ModelInfo> library;
-    int selected_model = -1; // indice dans library, -1 = aucun
+    int selected_model = -1; // index into library, -1 = none
 
-    // Historique de télémétrie (rempli par App à ~10 Hz, gardé 10 minutes) : moniteur, banc d'essai.
+    // Telemetry history (filled by App at ~10 Hz, kept 10 minutes): monitor and bench.
     std::deque<GpuSample> gpu_history;
 
-    // Débit de génération en direct, publié par la vue en cours de génération (labo, comparateur).
+    // Live generation throughput, published by the view that is generating (sampler, comparator).
     std::deque<std::pair<double, double>> tps_history; // (t_seconds, tokens/s)
 
-    // Page demandée par une vue (ex. « Ouvrir dans le planificateur ») ; App l'applique puis remet -1.
+    // Page requested by a view (for example "open in the planner"); App applies it, then sets -1.
     int requested_page = -1;
 
     std::deque<Toast> toasts;
-    void notify(std::string text, bool error = false); // défini dans app.cpp
+    void notify(std::string text, bool error = false); // defined in app.cpp
 
     const ModelInfo* selected() const {
         return selected_model >= 0 && selected_model < static_cast<int>(library.size())
@@ -50,4 +50,4 @@ struct AppContext {
     }
 };
 
-} // namespace banc::ui
+} // namespace waffle::ui

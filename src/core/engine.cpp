@@ -8,15 +8,15 @@
 #include <chrono>
 #include <deque>
 
-namespace banc {
+namespace waffle {
 
 namespace {
 
-// --- Journaux de llama.cpp --------------------------------------------------
-// llama_log_set est global : un seul puits partagé, protégé par un mutex.
+// --- llama.cpp logs ---------------------------------------------------------
+// llama_log_set is global: a single shared sink, protected by a mutex.
 std::mutex g_log_mutex;
 std::function<void(int, std::string_view)> g_log_sink;
-std::deque<std::string> g_recent_errors; // dernières erreurs, pour enrichir les messages
+std::deque<std::string> g_recent_errors; // recent errors, used to enrich messages
 
 void log_callback(ggml_log_level level, const char* text, void*) {
     if (!text) return;
@@ -52,7 +52,7 @@ std::once_flag g_backend_once;
 
 int default_threads() {
     unsigned hc = std::thread::hardware_concurrency();
-    return hc == 0 ? 4 : static_cast<int>(std::max(1u, hc / 2)); // ~ cœurs physiques
+    return hc == 0 ? 4 : static_cast<int>(std::max(1u, hc / 2)); // ~ physical cores
 }
 
 struct ProgressBridge {
@@ -63,7 +63,7 @@ struct ProgressBridge {
 bool progress_trampoline(float progress, void* user) {
     auto* bridge = static_cast<ProgressBridge*>(user);
     if (bridge->session->stop_requested()) return false;
-    if (bridge->fn && *bridge->fn) return (*bridge->fn)(progress, "Chargement des poids");
+    if (bridge->fn && *bridge->fn) return (*bridge->fn)(progress, "Loading weights");
     return true;
 }
 
@@ -84,7 +84,7 @@ int ggml_type_from_name(std::string_view name) {
         const char* n = ggml_type_name(static_cast<ggml_type>(i));
         if (n && lower(n) == wanted) return i;
     }
-    throw Error("Type de cache inconnu : " + std::string(name));
+    throw Error("Unknown cache type: " + std::string(name));
 }
 
 // ---------------------------------------------------------------------------
@@ -96,7 +96,7 @@ EngineSession::~EngineSession() {
 }
 
 const LoadedModel& EngineSession::info() const {
-    if (!info_) throw Error("Aucun modèle chargé");
+    if (!info_) throw Error("No model loaded");
     return *info_;
 }
 
@@ -116,7 +116,7 @@ const LoadedModel& EngineSession::load(const LoadParams& params, const ProgressF
 
     std::error_code ec;
     if (!std::filesystem::is_regular_file(params.model_path, ec))
-        throw Error("Fichier de modèle introuvable : " + params.model_path.string());
+        throw Error("Model file not found: " + params.model_path.string());
 
     const int type_k = ggml_type_from_name(params.type_k);
     const int type_v = ggml_type_from_name(params.type_v);
@@ -134,9 +134,9 @@ const LoadedModel& EngineSession::load(const LoadParams& params, const ProgressF
     if (!model_) {
         throw_if_stopped();
         const std::string details = take_recent_errors();
-        throw Error("Impossible de charger le modèle « " + params.model_path.filename().string() +
-                    " » : fichier corrompu, architecture non prise en charge ou mémoire insuffisante." +
-                    (details.empty() ? "" : "\nDétail : " + details));
+        throw Error("Cannot load model \"" + params.model_path.filename().string() +
+                    "\": corrupted file, unsupported architecture, or insufficient memory." +
+                    (details.empty() ? "" : "\nDetail: " + details));
     }
     vocab_ = llama_model_get_vocab(model_);
 
@@ -162,10 +162,10 @@ const LoadedModel& EngineSession::load(const LoadParams& params, const ProgressF
         const std::string details = take_recent_errors();
         unload();
         throw Error(
-            "Impossible de créer le contexte (" + std::to_string(params.n_ctx) + " tokens, cache " + params.type_k +
+            "Cannot create the context (" + std::to_string(params.n_ctx) + " tokens, cache " + params.type_k +
             "/" + params.type_v +
-            ") : mémoire insuffisante ou réglage incompatible (un cache V quantifié exige la flash attention)." +
-            (details.empty() ? "" : "\nDétail : " + details));
+            "): insufficient memory or incompatible setting (a quantized V cache requires flash attention)." +
+            (details.empty() ? "" : "\nDetail: " + details));
     }
 
     auto info = std::make_unique<LoadedModel>();
@@ -186,12 +186,12 @@ const LoadedModel& EngineSession::load(const LoadParams& params, const ProgressF
 }
 
 int EngineSession::n_vocab() const {
-    if (!vocab_) throw Error("Aucun modèle chargé");
+    if (!vocab_) throw Error("No model loaded");
     return llama_vocab_n_tokens(vocab_);
 }
 
 std::vector<llama_token> EngineSession::tokenize(std::string_view text, bool add_special, bool parse_special) const {
-    if (!vocab_) throw Error("Aucun modèle chargé");
+    if (!vocab_) throw Error("No model loaded");
     std::vector<llama_token> tokens(text.size() + 16);
     int32_t n = llama_tokenize(vocab_, text.data(), static_cast<int32_t>(text.size()), tokens.data(),
                                static_cast<int32_t>(tokens.size()), add_special, parse_special);
@@ -200,13 +200,13 @@ std::vector<llama_token> EngineSession::tokenize(std::string_view text, bool add
         n = llama_tokenize(vocab_, text.data(), static_cast<int32_t>(text.size()), tokens.data(),
                            static_cast<int32_t>(tokens.size()), add_special, parse_special);
     }
-    if (n < 0) throw Error("Échec de la tokenisation");
+    if (n < 0) throw Error("Tokenization failed");
     tokens.resize(static_cast<size_t>(n));
     return tokens;
 }
 
 std::string EngineSession::token_to_piece(llama_token token, bool special) const {
-    if (!vocab_) throw Error("Aucun modèle chargé");
+    if (!vocab_) throw Error("No model loaded");
     std::string piece(64, '\0');
     int32_t n = llama_token_to_piece(vocab_, token, piece.data(), static_cast<int32_t>(piece.size()), 0, special);
     if (n < 0) {
@@ -222,7 +222,7 @@ bool EngineSession::is_eog(llama_token token) const {
 }
 
 std::string EngineSession::apply_chat_template(std::string_view user_message) const {
-    if (!model_) throw Error("Aucun modèle chargé");
+    if (!model_) throw Error("No model loaded");
     const char* tmpl = llama_model_chat_template(model_, nullptr);
     if (!tmpl) return std::string(user_message);
     const std::string content(user_message);
@@ -233,18 +233,18 @@ std::string EngineSession::apply_chat_template(std::string_view user_message) co
         buf.resize(static_cast<size_t>(n));
         n = llama_chat_apply_template(tmpl, &msg, 1, true, buf.data(), static_cast<int32_t>(buf.size()));
     }
-    // Modèle Jinja non reconnu par la version sans Jinja : on retombe sur le texte brut.
+    // Jinja template not recognized by the non-Jinja build: fall back to the raw text.
     if (n < 0) return content;
     return std::string(buf.data(), static_cast<size_t>(n));
 }
 
 void EngineSession::clear_memory() {
-    if (!ctx_) throw Error("Aucun modèle chargé");
+    if (!ctx_) throw Error("No model loaded");
     llama_memory_clear(llama_get_memory(ctx_), true);
 }
 
 void EngineSession::decode(std::span<const llama_token> tokens, int32_t pos, int32_t seq, bool want_last_logits) {
-    if (!ctx_) throw Error("Aucun modèle chargé");
+    if (!ctx_) throw Error("No model loaded");
     if (tokens.empty()) return;
     const auto n_batch = static_cast<size_t>(info_->params.n_batch);
     llama_batch batch = llama_batch_init(static_cast<int32_t>(std::min(n_batch, tokens.size())), 0, 1);
@@ -267,20 +267,20 @@ void EngineSession::decode(std::span<const llama_token> tokens, int32_t pos, int
         const int32_t rc = llama_decode(ctx_, batch);
         if (rc == 2) throw Cancelled();
         if (rc == 1)
-            throw Error("Contexte plein : plus de place dans le cache KV (" + std::to_string(info_->n_ctx) +
-                        " tokens). Augmentez la taille du contexte.");
+            throw Error("Context is full: no room left in the KV cache (" + std::to_string(info_->n_ctx) +
+                        " tokens). Increase the context size.");
         if (rc != 0) {
             const std::string details = take_recent_errors();
-            throw Error("Échec de llama_decode (code " + std::to_string(rc) + ")" +
-                        (details.empty() ? "" : " : " + details));
+            throw Error("llama_decode failed (code " + std::to_string(rc) + ")" +
+                        (details.empty() ? "" : ": " + details));
         }
     }
 }
 
 const float* EngineSession::last_logits() const {
-    if (!ctx_) throw Error("Aucun modèle chargé");
+    if (!ctx_) throw Error("No model loaded");
     const float* logits = llama_get_logits_ith(ctx_, -1);
-    if (!logits) throw Error("Aucun logit disponible (rien n'a été décodé)");
+    if (!logits) throw Error("No logits available (nothing has been decoded)");
     return logits;
 }
 
@@ -369,7 +369,7 @@ void Engine::run(std::stop_token thread_stop) {
         {
             std::unique_lock lock(mutex_);
             cv_.wait(lock, thread_stop, [this] { return !queue_.empty(); });
-            // À l'arrêt, on vide quand même la file : chaque futur reçoit Cancelled.
+            // On shutdown, still drain the queue: each future receives Cancelled.
             if (queue_.empty()) break;
             item = std::move(queue_.front());
             queue_.pop_front();
@@ -377,7 +377,7 @@ void Engine::run(std::stop_token thread_stop) {
             current_ = item;
         }
         session_->stop_ = item->stop.get_token();
-        item->job(*session_); // packaged_task : les exceptions vont dans le futur
+        item->job(*session_); // packaged_task: exceptions go into the future
         session_->stop_ = {};
         {
             std::lock_guard lock(mutex_);
@@ -385,8 +385,8 @@ void Engine::run(std::stop_token thread_stop) {
             status_.clear();
         }
     }
-    // Les objets llama.cpp sont libérés sur le thread qui les a créés.
+    // llama.cpp objects are freed on the thread that created them.
     session_->unload();
 }
 
-} // namespace banc
+} // namespace waffle

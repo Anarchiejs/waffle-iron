@@ -10,32 +10,32 @@
 #include <imgui.h>
 #include <mutex>
 
-namespace banc::ui {
+namespace waffle::ui {
 namespace {
-// Texte original neutre : même référence pour les deux modèles, librement
-// éditable.
+// Neutral source text: the same reference for both models, freely
+// editable.
 static const char* reference_text =
-    R"REF(Dans une petite commune située près d'une rivière, la bibliothèque municipale prépare chaque année un programme consacré à la découverte du territoire. Ce programme rassemble des promenades, des lectures publiques et des ateliers ouverts aux habitants. Les organisateurs commencent par consulter les associations, les établissements scolaires et les personnes qui fréquentent les lieux. Ils cherchent à connaître les horaires disponibles, les sujets qui intéressent le public et les obstacles qui pourraient empêcher certaines personnes de participer. Les réponses sont ensuite réunies dans un document simple, présenté lors d'une réunion où chacun peut proposer des ajustements. La préparation demande surtout de la régularité et une répartition claire des responsabilités. Une équipe vérifie les parcours, une autre rassemble les documents et une troisième prépare les informations pratiques. Les promenades suivent des chemins accessibles qui relient plusieurs endroits du village. Au départ, un guide explique la durée prévue et rappelle les consignes utiles. Le groupe avance ensuite à un rythme modéré, avec des pauses pour observer le paysage. Près du pont, les participants comparent des photographies anciennes avec les bâtiments actuels. Certaines façades ont changé, tandis que les dimensions des rues restent reconnaissables. Cette comparaison permet de comprendre comment les usages évoluent sans que tous les repères disparaissent. Plus loin, une ancienne cour accueille désormais un jardin partagé. Les habitants y cultivent des légumes et des plantes aromatiques dans des parcelles de tailles différentes. Un tableau indique les périodes de plantation, les besoins en eau et les tâches communes. Les jardiniers expliquent que les résultats varient selon la météo, la qualité du sol et le temps consacré aux cultures. Ils prennent des notes pour comparer les saisons, mais évitent de tirer des conclusions à partir d'une seule récolte. Dans la bibliothèque, une exposition présente des cartes, des lettres et des objets prêtés par des familles. Chaque objet porte une étiquette qui précise son origine et les informations connues. Lorsque la date ou la fonction demeure incertaine, cette incertitude est indiquée. Les visiteurs peuvent compléter une fiche pour partager leurs souvenirs, qui seront ensuite comparés avec les autres sources disponibles. Cette méthode demande parfois de conserver plusieurs interprétations plutôt que de choisir immédiatement une explication. Les ateliers accueillent aussi des enfants qui réalisent une carte collective du quartier. Ils dessinent les lieux où ils aiment se retrouver et ceux qu'ils connaissent moins bien. Les adultes les aident à distinguer une observation personnelle d'une information vérifiable. Un trajet peut paraître long à une personne et court à une autre, tandis que sa distance peut être mesurée avec un outil adapté. Les deux types de description ont leur utilité lorsque leur sens est clairement expliqué. À la fin de la matinée, une pause permet aux participants de discuter autour de grandes tables. Certains évoquent des changements récents, comme l'ouverture d'un commerce ou la modification d'un arrêt de transport. D'autres racontent des habitudes plus anciennes. Les animateurs veillent à laisser une place aux personnes qui parlent peu et à reformuler les questions lorsque cela facilite la discussion. Le but consiste à recueillir des points de vue variés dans un cadre respectueux. Après les activités, les équipes rangent le matériel et rédigent un compte rendu. Elles comptent les participants, décrivent les difficultés rencontrées et notent les propositions reçues. Ces informations servent à préparer la prochaine édition. Une fréquentation plus faible ne signifie pas nécessairement que le thème était moins intéressant, car les conditions météorologiques, les horaires ou un autre événement peuvent avoir joué un rôle. Pour comparer les éditions, il faut donc garder une trace de ces circonstances. Le document final est conservé avec les programmes et les photographies dont la diffusion a été autorisée. Il reste consultable sur place et peut être résumé dans le bulletin communal. Les organisateurs privilégient des phrases simples pour que chacun puisse comprendre les décisions prises et les possibilités de participation. Ils précisent également les questions qui restent ouvertes, notamment les moyens de transport et les besoins d'accompagnement. Au fil du temps, ces archives forment une description progressive de la vie locale. Elles montrent des actions modestes, des essais et des corrections successives. Leur intérêt vient de la continuité des observations et de la diversité des personnes qui y contribuent. La bibliothèque devient ainsi un lieu où les informations circulent, où les souvenirs sont discutés et où de nouveaux projets peuvent prendre forme.)REF";
+    R"REF(In a small town beside a river, the municipal library prepares a yearly program devoted to discovering the local area. The program brings together walks, public readings, and workshops open to residents. The organizers begin by consulting associations, schools, and the people who use those places. They want to know which times are free, which subjects interest the public, and which obstacles might keep some people from taking part. The answers are then gathered into a simple document, presented at a meeting where anyone can suggest adjustments. Preparation mostly takes regularity and a clear split of responsibilities. One team checks the routes, another collects the documents, and a third prepares the practical information. The walks follow accessible paths that link several places in the village. At the start, a guide explains how long the walk should take and repeats the useful instructions. The group then moves at a moderate pace, with pauses to look at the landscape. Near the bridge, participants compare old photographs with the buildings as they stand now. Some facades have changed, while the width of the streets is still recognizable. The comparison shows how uses change without every landmark disappearing. Farther on, an old courtyard is now a shared garden. Residents grow vegetables and herbs in plots of different sizes. A board lists planting times, water needs, and shared tasks. The gardeners explain that results vary with the weather, the soil, and the time spent on the crops. They take notes in order to compare seasons, but they avoid drawing conclusions from a single harvest. Inside the library, an exhibition shows maps, letters, and objects lent by families. Each object carries a label with its origin and the known facts. When the date or the purpose is still uncertain, that uncertainty is written down. Visitors can fill in a card to share a memory, which is then compared with the other sources. The method sometimes means keeping several interpretations instead of picking one explanation at once. The workshops also welcome children who draw a collective map of the neighborhood. They mark the places where they like to meet and the ones they know less well. Adults help them separate a personal observation from a fact that can be checked. A route can feel long to one person and short to another, while its distance can be measured with a suitable tool. Both descriptions are useful when their meaning is stated clearly. At the end of the morning, a break lets people talk around large tables. Some mention recent changes, such as a shop opening or a change to a transit stop. Others describe older habits. The hosts leave room for people who speak little, and they rephrase a question when that helps. The aim is to collect varied points of view in a respectful setting. After the activities, the teams put the equipment away and write a short report. They count the participants, describe the difficulties they met, and note the proposals they received. That information is used to prepare the next edition. A smaller attendance does not by itself mean the theme was less interesting, because the weather, the schedule, or another event may have played a part. Comparing editions therefore means keeping a record of those circumstances. The final document is stored with the programs and with the photographs that were cleared for publication. It can be read on site and summarized in the town bulletin. The organizers prefer plain sentences so that everyone can understand the decisions and the ways to take part. They also state the questions that remain open, notably transport and the need for assistance. Over time these archives become a gradual description of local life. They show modest actions, trials, and successive corrections. Their value comes from the continuity of the observations and from the variety of people who contribute. The library becomes a place where information circulates, where memories are discussed, and where new projects can take shape.)REF";
 struct CompareProgress {
     std::mutex mutex;
     std::atomic_bool cancel{false};
     std::string text[2];
-    std::string label = "Préparation";
+    std::string label = "Setup";
     float fraction = 0;
 };
 class CompareView final : public View {
     int models_[2] = {-1, -1};
     int seen_selection_ = -1;
     LoadParams loads_[2];
-    char prompt_[8192] = "Explique le cycle de l'eau en quelques phrases.";
+    char prompt_[8192] = "Explain the water cycle in a few sentences.";
     char reference_[32768] = {};
     int max_tokens_ = 256;
     float temperature_ = 0;
     uint32_t seed_ = 42;
     bool perplexity_ = false;
     bool has_result_ = false;
-    float metrics_h_ = 0; // hauteur de la carte des mesures, mise à jour à chaque image
-    bool fold_settings_ = false; // replie les réglages au lancement, pour laisser la place aux résultats
+    float metrics_h_ = 0; // height of the measurement card, updated every frame
+    bool fold_settings_ = false; // folds the settings on launch, to leave room for the results
     CompareResult result_;
     Engine* engine_ = nullptr;
     std::future<CompareResult> future_;
@@ -56,7 +56,7 @@ class CompareView final : public View {
             if (valid[i])
                 ImGui::Text(std::strcmp(unit, "tokens") ? "%.2f %s" : "%.0f %s", values[i], unit);
             else
-                ImGui::TextDisabled("Non mesuré");
+                ImGui::TextDisabled("Not measured");
             if (best) {
                 ImGui::PopStyleColor();
                 ImGui::SameLine();
@@ -69,10 +69,10 @@ class CompareView final : public View {
         badge(i ? "B" : "A", side_color(i));
         ImGui::SameLine();
         push_font(fonts().semibold, 1.06f);
-        ImGui::TextUnformatted(i ? "Modèle B" : "Modèle A");
+        ImGui::TextUnformatted(i ? "Model B" : "Model A");
         ImGui::PopFont();
-        field_label("Modèle");
-        model_combo("##modele", ctx, models_[i]);
+        field_label("Model");
+        model_combo("##model", ctx, models_[i]);
         int layers = 100;
         if (models_[i] >= 0 && models_[i] < static_cast<int>(ctx.library.size())) {
             const auto& m = ctx.library[static_cast<size_t>(models_[i])];
@@ -83,29 +83,29 @@ class CompareView final : public View {
         ImGui::PopID();
     }
     void common(AppContext& ctx) {
-        card_title("Essai", "Les modèles sont chargés l'un après l'autre pour tenir dans la VRAM.");
-        field_label("Consigne");
-        ImGui::InputTextMultiline("##consigne", prompt_, sizeof(prompt_), ImVec2(-FLT_MIN, em(5)));
+        card_title("Trial", "The models are loaded one after the other so they fit in VRAM.");
+        field_label("Prompt");
+        ImGui::InputTextMultiline("##prompt", prompt_, sizeof(prompt_), ImVec2(-FLT_MIN, em(5)));
         field_pair(
             [&](float w) {
                 field_label("Tokens max", nullptr, w);
                 ImGui::InputInt("##max", &max_tokens_, 0, 0);
             },
             [&](float w) {
-                field_label("Graine", nullptr, w);
-                ImGui::InputScalar("##graine", ImGuiDataType_U32, &seed_);
+                field_label("Seed", nullptr, w);
+                ImGui::InputScalar("##seed", ImGuiDataType_U32, &seed_);
             });
-        field_label("Température", "0 : décodage glouton, reproductible.");
+        field_label("Temperature", "0: greedy decoding, reproducible.");
         ImGui::SliderFloat("##temp", &temperature_, 0, 2, "%.2f");
-        checkbox("Mesurer la perplexité", &perplexity_);
-        help_marker("Perplexité de chaque modèle sur un texte de référence commun (plus bas = mieux).");
+        checkbox("Measure perplexity", &perplexity_);
+        help_marker("Each model's perplexity on a shared reference text (lower is better).");
         if (perplexity_) {
-            field_label("Texte de référence");
+            field_label("Reference text");
             ImGui::InputTextMultiline("##reference", reference_, sizeof(reference_), ImVec2(-FLT_MIN, em(8)));
         }
         if (!loads_[0].model_path.empty() && loads_[0] == loads_[1]) {
             ImGui::PushStyleColor(ImGuiCol_Text, col::amber);
-            ImGui::TextWrapped("Attention : les deux côtés sont identiques.");
+            ImGui::TextWrapped("Warning: both sides are identical.");
             ImGui::PopStyleColor();
         }
         const bool valid = models_[0] >= 0 && models_[1] >= 0 && models_[0] < static_cast<int>(ctx.library.size()) &&
@@ -113,11 +113,11 @@ class CompareView final : public View {
                            max_tokens_ <= 100000 && (!perplexity_ || reference_[0]);
         ImGui::Dummy({0, em(.1f)});
         ImGui::BeginDisabled(!valid || future_.valid());
-        if (primary_button("Lancer la comparaison", {-FLT_MIN, 0})) launch(ctx);
+        if (primary_button("Run comparison", {-FLT_MIN, 0})) launch(ctx);
         ImGui::EndDisabled();
         if (!valid && !future_.valid()) {
             push_font(nullptr, .88f);
-            dim_wrapped("Choisissez un modèle pour A et pour B.");
+            dim_wrapped("Choose a model for A and for B.");
             ImGui::PopFont();
         }
     }
@@ -161,7 +161,7 @@ class CompareView final : public View {
             const std::string name = has_result_ ? (i ? result_.b : result_.a).model_name
                                      : index >= 0 && index < static_cast<int>(ctx.library.size())
                                          ? model_title(ctx.library[static_cast<size_t>(index)])
-                                         : std::string("Aucun modèle");
+                                         : std::string("No model");
             push_font(fonts().semibold, 1.0f);
             ImGui::TextUnformatted(name.c_str());
             ImGui::PopFont();
@@ -169,13 +169,13 @@ class CompareView final : public View {
                 const auto& side = i ? result_.b : result_.a;
                 if (!side.error.empty()) {
                     ImGui::PushStyleColor(ImGuiCol_Text, col::bad);
-                    ImGui::TextWrapped("Erreur : %s", side.error.c_str());
+                    ImGui::TextWrapped("Error: %s", side.error.c_str());
                     ImGui::PopStyleColor();
                 }
             }
             ImGui::BeginChild("##texte", {0, 0}, ImGuiChildFlags_FrameStyle);
             if (text.empty())
-                ImGui::TextDisabled(future_.valid() ? "En attente..." : "La réponse du modèle s'affichera ici.");
+                ImGui::TextDisabled(future_.valid() ? "Waiting..." : "The model reply will appear here.");
             else
                 ImGui::TextWrapped("%s", text.c_str());
             if (future_.valid() && ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - em(1)) ImGui::SetScrollHereY(1.0f);
@@ -185,11 +185,11 @@ class CompareView final : public View {
         ImGui::PopID();
     }
     void metrics() {
-        card_title("Mesures");
-        if (!ImGui::BeginTable("mesures AB", 3,
+        card_title("Measurements");
+        if (!ImGui::BeginTable("measures AB", 3,
                                ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingStretchSame))
             return;
-        ImGui::TableSetupColumn("Mesure");
+        ImGui::TableSetupColumn("Measurement");
         ImGui::TableSetupColumn("A");
         ImGui::TableSetupColumn("B");
         ImGui::PushStyleColor(ImGuiCol_Text, col::dim);
@@ -198,14 +198,14 @@ class CompareView final : public View {
         const auto& a = result_.a;
         const auto& b = result_.b;
         bool va = a.error.empty(), vb = b.error.empty();
-        metric("Lecture consigne", a.pp_tps, b.pp_tps, true, "tok/s", va && a.pp_tps > 0, vb && b.pp_tps > 0);
-        metric("Génération", a.tg_tps, b.tg_tps, true, "tok/s", va && a.tg_tps > 0, vb && b.tg_tps > 0);
-        metric("Chargement", a.load_ms, b.load_ms, false, "ms", va, vb);
+        metric("Prompt prefill", a.pp_tps, b.pp_tps, true, "tok/s", va && a.pp_tps > 0, vb && b.pp_tps > 0);
+        metric("Generation", a.tg_tps, b.tg_tps, true, "tok/s", va && a.tg_tps > 0, vb && b.tg_tps > 0);
+        metric("Load", a.load_ms, b.load_ms, false, "ms", va, vb);
         metric("VRAM max", static_cast<double>(a.vram_peak) / MiB, static_cast<double>(b.vram_peak) / MiB, false,
                "Mo", va && a.vram_peak > 0, vb && b.vram_peak > 0);
-        metric("Perplexité", a.perplexity.value_or(0), b.perplexity.value_or(0), false, "",
+        metric("Perplexity", a.perplexity.value_or(0), b.perplexity.value_or(0), false, "",
                va && a.perplexity.has_value(), vb && b.perplexity.has_value());
-        metric("Tokens générés", a.n_generated, b.n_generated, true, "tokens", va, vb);
+        metric("Generated tokens", a.n_generated, b.n_generated, true, "tokens", va, vb);
         ImGui::EndTable();
     }
 
@@ -213,15 +213,15 @@ public:
     CompareView() { std::snprintf(reference_, sizeof(reference_), "%s", reference_text); }
     ~CompareView() override {
         progress_->cancel = true;
-        // À l'arrêt, terminer avant la destruction des services partagés.
+        // On shutdown, finish before the shared services are destroyed.
         if (future_.valid()) {
             if (engine_) engine_->cancel_all();
             future_.wait();
         }
     }
-    const char* title() const override { return "Comparateur"; }
+    const char* title() const override { return "Comparator"; }
     const char* subtitle() const override {
-        return "Deux modèles ou deux réglages, une même consigne : réponses et mesures côte à côte.";
+        return "Two models or two settings, one prompt: replies and measurements side by side.";
     }
     const char* icon() const override { return ""; }
     void draw(AppContext& ctx) override {
@@ -256,19 +256,19 @@ public:
         const float gap = em(1);
         const bool wide = avail.x >= em(50);
         if (wide) {
-            if (begin_card("##Essai", {side_width(.27f, 19, 24), avail.y})) common(ctx);
+            if (begin_card("##Trial", {side_width(.27f, 19, 24), avail.y})) common(ctx);
             end_card();
             ImGui::SameLine(0, gap);
             ImGui::BeginChild("##Duel", {0, avail.y}, ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
         } else {
-            if (begin_card("##Essai")) common(ctx);
+            if (begin_card("##Trial")) common(ctx);
             end_card();
         }
         if (future_.valid() && busy_indicator(label.c_str(), fraction)) {
             progress_->cancel = true;
             ctx.engine.cancel_all();
         }
-        // Réglages A et B côte à côte (repliables pour laisser la place aux réponses).
+        // Settings for A and B side by side (collapsible, to leave room for the replies).
         const float row = ImGui::GetContentRegionAvail().x;
         const bool two = row >= em(30);
         const float half = two ? std::floor((row - gap) * .5f) : row;
@@ -277,18 +277,18 @@ public:
             ImGui::SetNextItemOpen(false);
             fold_settings_ = false;
         }
-        if (collapsing("Réglages des modèles A et B", ImGuiTreeNodeFlags_DefaultOpen)) {
+        if (collapsing("Settings for models A and B", ImGuiTreeNodeFlags_DefaultOpen)) {
             ImGui::BeginDisabled(future_.valid());
             for (int i = 0; i < 2; ++i) {
                 if (i && two) ImGui::SameLine(0, gap);
                 ImGui::PushID(i);
-                if (begin_card("##réglages", {half, 0})) side_config(ctx, i);
+                if (begin_card("##settings", {half, 0})) side_config(ctx, i);
                 end_card();
                 ImGui::PopID();
             }
             ImGui::EndDisabled();
         }
-        // Hauteur de la carte des mesures mesurée à l'image précédente (estimation à la première).
+        // Height of the measurement card measured on the previous frame (an estimate on the first).
         const float metrics_h = has_result_ ? (metrics_h_ > 0 ? metrics_h_ : em(17)) + ImGui::GetStyle().ItemSpacing.y : 0;
         const float out_h = std::max(em(12), ImGui::GetContentRegionAvail().y - metrics_h);
         for (int i = 0; i < 2; ++i) {
@@ -296,7 +296,7 @@ public:
             output(ctx, i, texts[i], {half, out_h});
         }
         if (has_result_) {
-            if (begin_card("##Mesures")) metrics();
+            if (begin_card("##Measurements")) metrics();
             end_card();
             metrics_h_ = ImGui::GetItemRectSize().y;
         }
@@ -307,4 +307,4 @@ public:
 std::unique_ptr<View> make_compare_view() {
     return std::make_unique<CompareView>();
 }
-} // namespace banc::ui
+} // namespace waffle::ui

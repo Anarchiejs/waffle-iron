@@ -7,7 +7,7 @@
 #include <cmath>
 #include <cstdio>
 #include <vector>
-namespace banc::ui {
+namespace waffle::ui {
 namespace {
 class MonitorView final : public View {
     int minutes_ = 1;
@@ -59,12 +59,12 @@ class MonitorView final : public View {
                     ImPlotSpec line;
                     line.LineColor = s.color;
                     line.LineWeight = 2.0f;
-                    ImPlot::PlotLine(s.ceiling ? "Utilisée" : "##ligne", s.x->data(), s.y->data(), n, line);
+                    ImPlot::PlotLine(s.ceiling ? "In use" : "##line", s.x->data(), s.y->data(), n, line);
                     if (s.ceiling) {
                         ImPlotSpec cap;
                         cap.LineColor = col::faint;
                         cap.LineWeight = 1.5f;
-                        ImPlot::PlotLine("Capacité", s.x->data(), s.ceiling->data(), n, cap);
+                        ImPlot::PlotLine("Capacity", s.x->data(), s.ceiling->data(), n, cap);
                     }
                 }
                 ImPlot::EndPlot();
@@ -76,22 +76,22 @@ class MonitorView final : public View {
     }
 
 public:
-    const char* title() const override { return "Moniteur"; }
+    const char* title() const override { return "Monitor"; }
     const char* subtitle() const override {
-        return "Télémétrie du GPU en direct : charge, mémoire, température, puissance et débit de génération.";
+        return "Live GPU telemetry: load, memory, temperature, power, and generation throughput.";
     }
     const char* icon() const override { return ""; }
     void draw(AppContext& ctx) override {
         if (!ctx.telemetry.available()) {
             if (begin_card("##nvml")) {
                 card_title("NVML indisponible");
-                dim_wrapped((ctx.telemetry.error() + ". Les mesures GPU ne sont pas disponibles.").c_str());
+                dim_wrapped((ctx.telemetry.error() + ". GPU measurements are not available.").c_str());
             }
             end_card();
         }
-        // Fenêtre d'historique : boutons segmentés.
+        // History window: segmented buttons.
         ImGui::AlignTextToFramePadding();
-        ImGui::TextDisabled("Fenêtre");
+        ImGui::TextDisabled("Window");
         for (int m : {1, 2, 5, 10}) {
             ImGui::SameLine();
             char label[16];
@@ -130,28 +130,28 @@ public:
             std::snprintf(buf[2], 48, "%u °C", g.temperature_c);
             std::snprintf(buf[3], 48, "%.1f W", g.power_w);
             std::snprintf(buf[4], 48, "%u MHz", g.sm_clock_mhz);
-            tiles = {{"Charge GPU", buf[0], "", col::accent},
-                     {"VRAM utilisée", format_bytes(g.vram_used), buf[1], col::teal},
-                     {"Température", buf[2], "", col::amber},
+            tiles = {{"GPU load", buf[0], "", col::accent},
+                     {"VRAM used", format_bytes(g.vram_used), buf[1], col::teal},
+                     {"Temperature", buf[2], "", col::amber},
                      {"Puissance", buf[3], "", col::mauve},
-                     {"Fréquence SM", buf[4], "", col::accent}};
+                     {"SM clock", buf[4], "", col::accent}};
         }
         {
             char rate_text[32] = "—";
             if (!rate.empty()) std::snprintf(rate_text, sizeof rate_text, "%.1f", rate.back());
-            tiles.push_back({"Génération", rate_text, rate.empty() ? "aucune en cours" : "tok/s", col::good});
+            tiles.push_back({"Generation", rate_text, rate.empty() ? "none in progress" : "tok/s", col::good});
         }
         tile_grid(tiles, em(7.5f));
         ImGui::Dummy({0, em(.2f)});
 
         const double vram_cap = total.empty() ? 0 : total.back();
         const Series series[] = {
-            {"Charge GPU", "%", &t, &util, col::accent, 0, 100},
+            {"GPU load", "%", &t, &util, col::accent, 0, 100},
             {"VRAM", "Go", &t, &used, col::teal, 0, std::max(1.0, vram_cap * 1.05), &total},
-            {"Température", "°C", &t, &temp, col::amber, 0, 0},
+            {"Temperature", "°C", &t, &temp, col::amber, 0, 0},
             {"Puissance", "W", &t, &power, col::mauve, 0, 0},
-            {"Fréquence SM", "MHz", &t, &clock, col::accent, 0, 0},
-            {"Débit de génération", "tok/s", &tx, &rate, col::good, 0, 0},
+            {"SM clock", "MHz", &t, &clock, col::accent, 0, 0},
+            {"Generation throughput", "tok/s", &tx, &rate, col::good, 0, 0},
         };
         const ImVec2 avail = ImGui::GetContentRegionAvail();
         const float gap = ImGui::GetStyle().ItemSpacing.x;
@@ -169,4 +169,4 @@ public:
 std::unique_ptr<View> make_monitor_view() {
     return std::make_unique<MonitorView>();
 }
-} // namespace banc::ui
+} // namespace waffle::ui

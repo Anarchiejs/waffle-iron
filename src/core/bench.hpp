@@ -1,4 +1,4 @@
-// Banc d'essai : mesures de vitesse (pp, tg, ttft), statistiques, campagnes en grille, export.
+// Benchmark: speed measurements (pp, tg, ttft), statistics, grid campaigns, and export.
 #pragma once
 
 #include "core/types.hpp"
@@ -8,48 +8,48 @@
 #include <string>
 #include <vector>
 
-namespace banc {
+namespace waffle {
 
 class Engine;
 class EngineSession;
 class Telemetry;
 
-// Moyenne, écart-type (échantillon, n-1), médiane, min, max ; valeurs aberrantes par score z
-// modifié (0.6745 * |x - médiane| / MAD > 3.5 ; aucune si MAD == 0). n == 0 -> tout à 0.
+// Mean, sample standard deviation (n-1), median, min, max; outliers by modified z-score
+// (0.6745 * |x - median| / MAD > 3.5; none if MAD == 0). n == 0 -> all zeros.
 Stats compute_stats(std::span<const double> values);
 
-// Une mesure, sur le thread du moteur, modèle déjà chargé avec cfg.load :
-// vide le cache, décode n_prompt tokens aléatoires (graine fixe, hors tokens spéciaux) -> pp_tps,
-// puis génère n_gen tokens un par un en glouton -> tg_tps ; ttft = consigne + premier token.
-// vram_peak reste à 0 (rempli par run_bench).
+// One measurement, on the engine thread, model already loaded with cfg.load:
+// clears the cache, decodes n_prompt random tokens (fixed seed, excluding special tokens) -> pp_tps,
+// then generates n_gen tokens one by one greedily -> tg_tps; ttft = prompt + first token.
+// vram_peak stays 0 (filled in by run_bench).
 BenchSample run_bench_once(EngineSession& session, const BenchConfig& cfg);
 
-// Charge le modèle, fait warmup + repetitions mesures, calcule les stats.
-// Bloque le thread appelant (pas le thread du moteur) ; soumet les travaux à l'Engine.
-// telemetry peut être nullptr (vram_peak = 0). progress peut annuler.
+// Loads the model, runs warmup + repetitions measurements, and computes the stats.
+// Blocks the calling thread (not the engine thread); submits work to the Engine.
+// telemetry may be nullptr (vram_peak = 0). progress may cancel.
 BenchResult run_bench(Engine& engine, Telemetry* telemetry, const BenchConfig& cfg, const ProgressFn& progress = {});
 
-// Grille de réglages : produit cartésien des listes non vides (une liste vide = valeur de `base`).
+// Settings grid: Cartesian product of the non-empty lists (an empty list keeps `base`).
 struct CampaignGrid {
     BenchConfig base;
     std::vector<int> n_gpu_layers;
     std::vector<uint32_t> n_ctx;
-    std::vector<std::string> kv_type; // appliqué à type_k ET type_v
+    std::vector<std::string> kv_type; // applied to type_k AND type_v
     std::vector<int> flash_attn;
     std::vector<uint32_t> n_ubatch;
 };
 std::vector<BenchConfig> expand_grid(const CampaignGrid& grid);
 
-// Campagne complète ; un BenchResult par configuration (une configuration qui échoue — mémoire
-// insuffisante… — est sautée et son erreur ajoutée à `errors` si non nul).
+// Full campaign; one BenchResult per configuration (a configuration that fails — insufficient
+// memory… — is skipped and its error is appended to `errors` when non-null).
 std::vector<BenchResult> run_campaign(Engine& engine, Telemetry* telemetry, const CampaignGrid& grid,
                                       const ProgressFn& progress = {}, std::vector<std::string>* errors = nullptr);
 
-// Exports : une ligne par BenchResult (moyennes ± écart-type), colonnes stables et documentées.
+// Exports: one line per BenchResult (mean ± standard deviation), stable documented columns.
 std::string to_csv(const std::vector<BenchResult>& results);
 std::string to_markdown(const std::vector<BenchResult>& results);
 
-// Libellé court d'une configuration : "ngl=99 ctx=4096 kv=q8_0 fa=on ub=512".
+// Short configuration label: "ngl=99 ctx=4096 kv=q8_0 fa=on ub=512".
 std::string config_label(const BenchConfig& cfg);
 
-} // namespace banc
+} // namespace waffle

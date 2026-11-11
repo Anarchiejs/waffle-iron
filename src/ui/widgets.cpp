@@ -8,7 +8,7 @@
 #include <cmath>
 #include <cstdio>
 
-namespace banc::ui {
+namespace waffle::ui {
 
 void AppContext::notify(std::string text, bool error) {
     toasts.push_back({std::move(text), error, ImGui::GetTime() + (error ? 8.0 : 4.0)});
@@ -19,13 +19,13 @@ std::string format_bytes(uint64_t bytes) {
     char buf[32];
     const double b = static_cast<double>(bytes);
     if (bytes >= GiB)
-        std::snprintf(buf, sizeof buf, "%.2f Go", b / GiB);
+        std::snprintf(buf, sizeof buf, "%.2f GiB", b / GiB);
     else if (bytes >= MiB)
-        std::snprintf(buf, sizeof buf, "%.0f Mo", b / MiB);
+        std::snprintf(buf, sizeof buf, "%.0f MiB", b / MiB);
     else if (bytes >= KiB)
-        std::snprintf(buf, sizeof buf, "%.0f Ko", b / KiB);
+        std::snprintf(buf, sizeof buf, "%.0f KiB", b / KiB);
     else
-        std::snprintf(buf, sizeof buf, "%llu o", static_cast<unsigned long long>(bytes));
+        std::snprintf(buf, sizeof buf, "%llu B", static_cast<unsigned long long>(bytes));
     return buf;
 }
 
@@ -78,11 +78,11 @@ void text_ellipsis(ImDrawList* dl, ImFont* font, float size, ImVec2 pos, float m
         dl->AddText(font, size, pos, color, begin, end);
         return;
     }
-    static const char ellipsis[] = "…"; // points de suspension (U+2026)
+    static const char ellipsis[] = "…"; // ellipsis (U+2026)
     const float room = max_x - pos.x - width(ellipsis, ellipsis + 3);
     while (end > begin && width(begin, end) > room) {
         --end;
-        while (end > begin && (static_cast<unsigned char>(*end) & 0xC0) == 0x80) --end; // frontière UTF-8
+        while (end > begin && (static_cast<unsigned char>(*end) & 0xC0) == 0x80) --end; // UTF-8 boundary
     }
     const std::string cut = std::string(begin, end) + ellipsis;
     dl->AddText(font, size, pos, color, cut.c_str());
@@ -90,7 +90,7 @@ void text_ellipsis(ImDrawList* dl, ImFont* font, float size, ImVec2 pos, float m
 
 bool model_combo(const char* id, AppContext& ctx, int& index, float width) {
     const bool valid = index >= 0 && index < static_cast<int>(ctx.library.size());
-    std::string preview = "Choisir un modèle...";
+    std::string preview = "Choose a model...";
     if (valid) {
         const auto& m = ctx.library[static_cast<size_t>(index)];
         preview = model_title(m) + "  ·  " + m.file_type;
@@ -99,13 +99,13 @@ bool model_combo(const char* id, AppContext& ctx, int& index, float width) {
     bool changed = false;
     ImGui::SetNextWindowSizeConstraints({em(24), 0}, {FLT_MAX, em(24)});
     if (ImGui::BeginCombo(id, preview.c_str(), ImGuiComboFlags_HeightLarge)) {
-        if (ctx.library.empty()) ImGui::TextDisabled("La bibliothèque est vide.");
+        if (ctx.library.empty()) ImGui::TextDisabled("The library is empty.");
         for (int i = 0; i < static_cast<int>(ctx.library.size()); ++i) {
             const auto& m = ctx.library[static_cast<size_t>(i)];
             ImGui::PushID(i);
             const float h = ImGui::GetTextLineHeight() * 2 + ImGui::GetStyle().ItemSpacing.y * .3f;
             const ImVec2 pos = ImGui::GetCursorScreenPos();
-            if (ImGui::Selectable("##modele", i == index, 0, {0, h})) {
+            if (ImGui::Selectable("##model", i == index, 0, {0, h})) {
                 index = i;
                 changed = true;
             }
@@ -146,11 +146,11 @@ bool load_params_editor(LoadParams& p, int max_layers) {
     bool changed = false;
     const int top = std::max(max_layers, 1);
     int ngl = p.n_gpu_layers < 0 ? top : std::min(p.n_gpu_layers, top);
-    field_label("Couches sur GPU",
-                "Nombre de couches du modèle placées en VRAM. Le maximum place tout le modèle sur la carte.");
+    field_label("GPU layers",
+                "How many model layers are placed in VRAM. The maximum puts the whole model on the GPU.");
     char ngl_label[48];
     if (ngl >= top)
-        std::snprintf(ngl_label, sizeof ngl_label, "Toutes (%d)", top);
+        std::snprintf(ngl_label, sizeof ngl_label, "All (%d)", top);
     else
         std::snprintf(ngl_label, sizeof ngl_label, "%d / %d", ngl, top);
     if (ImGui::SliderInt("##ngl", &ngl, 0, top, ngl_label)) {
@@ -164,7 +164,7 @@ bool load_params_editor(LoadParams& p, int max_layers) {
         if (static_cast<uint32_t>(ctx_steps[i]) <= p.n_ctx) ctx_idx = i;
     char ctx_label[32];
     std::snprintf(ctx_label, sizeof ctx_label, "%u tokens", p.n_ctx);
-    field_label("Contexte");
+    field_label("Context");
     if (ImGui::SliderInt("##ctx", &ctx_idx, 0, IM_ARRAYSIZE(ctx_steps) - 1, ctx_label)) {
         p.n_ctx = static_cast<uint32_t>(ctx_steps[ctx_idx]);
         changed = true;
@@ -177,7 +177,7 @@ bool load_params_editor(LoadParams& p, int max_layers) {
         },
         [&](float w) {
             field_label("Cache V",
-                        "Quantifier le cache KV (q8_0, q4_0) divise sa taille ; un cache V quantifié exige la flash "
+                        "Quantizing the KV cache (q8_0, q4_0) shrinks it; a quantized V cache requires flash "
                         "attention.",
                         w);
             changed |= string_combo("##v", p.type_v, kv_cache_types());
@@ -185,7 +185,7 @@ bool load_params_editor(LoadParams& p, int max_layers) {
     field_pair(
         [&](float w) {
             field_label("Flash attention", nullptr, w);
-            const char* fa_items[] = {"Auto", "Non", "Oui"};
+            const char* fa_items[] = {"Auto", "No", "Yes"};
             int fa = p.flash_attn + 1;
             if (ImGui::Combo("##fa", &fa, fa_items, IM_ARRAYSIZE(fa_items))) {
                 p.flash_attn = fa - 1;
@@ -199,29 +199,29 @@ bool load_params_editor(LoadParams& p, int max_layers) {
                 if (static_cast<uint32_t>(ub_steps[i]) == p.n_ubatch) ub_idx = i;
             char ub_label[16];
             std::snprintf(ub_label, sizeof ub_label, "%u", p.n_ubatch);
-            field_label("Micro-lot (ubatch)", nullptr, w);
+            field_label("Micro-batch (ubatch)", nullptr, w);
             if (ImGui::SliderInt("##ub", &ub_idx, 0, IM_ARRAYSIZE(ub_steps) - 1, ub_label)) {
                 p.n_ubatch = static_cast<uint32_t>(ub_steps[ub_idx]);
                 changed = true;
             }
         });
-    changed |= checkbox("Cache SWA complet", &p.swa_full);
-    help_marker("Modèles à fenêtre glissante (Gemma...) : par défaut llama.cpp alloue le cache de ces couches sur "
-                "tout le contexte. Décoché, il se limite à la fenêtre : beaucoup moins de VRAM en contexte long.");
+    changed |= checkbox("Full SWA cache", &p.swa_full);
+    help_marker("Sliding-window models (Gemma...): llama.cpp allocates those layers' cache for "
+                "the whole context by default. Unchecked, it is limited to the window and uses much less VRAM at long context.");
     return changed;
 }
 
 bool busy_indicator(const char* label, float fraction) {
-    const float button = ImGui::CalcTextSize("Annuler").x + ImGui::GetStyle().FramePadding.x * 2;
+    const float button = ImGui::CalcTextSize("Cancel").x + ImGui::GetStyle().FramePadding.x * 2;
     if (fraction < 0.0f) {
-        // Barre indéterminée : un segment qui va et vient.
+        // Indeterminate bar: a segment that travels back and forth.
         const float t = static_cast<float>(ImGui::GetTime());
         fraction = 0.5f + 0.5f * std::sin(t * 3.0f);
     }
     ImGui::ProgressBar(std::clamp(fraction, 0.0f, 1.0f),
                        ImVec2(-(button + ImGui::GetStyle().ItemSpacing.x), 0.0f), label);
     ImGui::SameLine();
-    return ImGui::Button("Annuler", ImVec2(button, 0.0f));
+    return ImGui::Button("Cancel", ImVec2(button, 0.0f));
 }
 
 bool begin_card(const char* id, ImVec2 size, ImGuiWindowFlags flags) {
@@ -281,8 +281,8 @@ void field_pair(const std::function<void(float)>& left, const std::function<void
         right(avail);
         return;
     }
-    // Positions explicites plutôt que SameLine : SameLine reprendrait la ligne de base du cadre de gauche et
-    // décalerait le libellé de droite vers le bas.
+    // Explicit positions instead of SameLine: SameLine would resume the left frame's baseline and
+    // push the right label downward.
     const float w = std::floor((avail - gap) * .5f);
     const ImVec2 start = ImGui::GetCursorPos();
     ImGui::BeginGroup();
@@ -380,7 +380,7 @@ void empty_state(const char* title, const char* text) {
     ImGui::SetCursorPosX(x);
     ImGui::PushTextWrapPos(x + width);
     ImGui::PushStyleColor(ImGuiCol_Text, col::dim);
-    // Centrage ligne à ligne d'un texte court : une seule ligne si elle tient, sinon paragraphe aligné.
+    // Center a short text line by line: one line when it fits, otherwise a wrapped paragraph.
     const float lw = ImGui::CalcTextSize(text).x;
     if (lw < width) ImGui::SetCursorPosX(x + (width - lw) * .5f);
     ImGui::TextWrapped("%s", text);
@@ -394,7 +394,7 @@ void tile_grid(const std::vector<Tile>& tiles, float min_width) {
     const float gap = ImGui::GetStyle().ItemSpacing.x;
     int cols = std::max(1, static_cast<int>((avail + gap) / (min_width + gap)));
     cols = std::min(cols, static_cast<int>(tiles.size()));
-    // Rangées équilibrées : 6 tuiles sur 4 colonnes donnent 3 + 3 plutôt que 4 + 2.
+    // Balanced rows: 6 tiles in 4 columns become 3 + 3 rather than 4 + 2.
     const int rows = (static_cast<int>(tiles.size()) + cols - 1) / cols;
     cols = (static_cast<int>(tiles.size()) + rows - 1) / rows;
     const float w = std::floor((avail - gap * static_cast<float>(cols - 1)) / static_cast<float>(cols));
@@ -429,4 +429,4 @@ float side_width(float ratio, float min_em, float max_em) {
     return std::clamp(ImGui::GetContentRegionAvail().x * ratio, em(min_em), em(max_em));
 }
 
-} // namespace banc::ui
+} // namespace waffle::ui

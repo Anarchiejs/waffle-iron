@@ -97,7 +97,7 @@ void print_table(const std::vector<std::string>& headers, const std::vector<std:
 }
 
 std::string format_bytes(uint64_t bytes) {
-    const char* units[] = {"o", "Kio", "Mio", "Gio", "Tio"};
+    const char* units[] = {"B", "KiB", "MiB", "GiB", "TiB"};
     double value = static_cast<double>(bytes);
     int unit = 0;
     while (value >= 1024.0 && unit < 4) {
@@ -137,40 +137,40 @@ std::vector<std::string> split_comma(const std::string& text, const std::string&
         }
     }
     if (!current.empty()) parts.push_back(current);
-    if (parts.empty()) throw banc::Error("Liste vide pour " + flag);
+    if (parts.empty()) throw waffle::Error("Empty list for " + flag);
     return parts;
 }
 
 long long parse_integer(const std::string& text, const std::string& flag) {
-    if (text.empty()) throw banc::Error("Nombre entier attendu pour " + flag);
+    if (text.empty()) throw waffle::Error("Expected an integer for " + flag);
     size_t used = 0;
     long long value = 0;
     try {
         value = std::stoll(text, &used);
     } catch (const std::exception&) {
-        throw banc::Error("Nombre entier attendu pour " + flag + " : " + text);
+        throw waffle::Error("Expected an integer for " + flag + ": " + text);
     }
-    if (used != text.size()) throw banc::Error("Nombre entier attendu pour " + flag + " : " + text);
+    if (used != text.size()) throw waffle::Error("Expected an integer for " + flag + ": " + text);
     return value;
 }
 
 double parse_double(const std::string& text, const std::string& flag) {
-    if (text.empty()) throw banc::Error("Nombre attendu pour " + flag);
+    if (text.empty()) throw waffle::Error("Expected a number for " + flag);
     size_t used = 0;
     double value = 0;
     try {
         value = std::stod(text, &used);
     } catch (const std::exception&) {
-        throw banc::Error("Nombre attendu pour " + flag + " : " + text);
+        throw waffle::Error("Expected a number for " + flag + ": " + text);
     }
-    if (used != text.size()) throw banc::Error("Nombre attendu pour " + flag + " : " + text);
+    if (used != text.size()) throw waffle::Error("Expected a number for " + flag + ": " + text);
     return value;
 }
 
 uint32_t parse_u32_at_least(const std::string& text, const std::string& flag, uint32_t minimum) {
     const long long value = parse_integer(text, flag);
     if (value < static_cast<long long>(minimum) || value > static_cast<long long>(UINT32_MAX))
-        throw banc::Error(flag + " hors plage : " + text);
+        throw waffle::Error(flag + " out of range: " + text);
     return static_cast<uint32_t>(value);
 }
 
@@ -194,72 +194,72 @@ std::vector<std::string> command_line() {
     LocalFree(wide);
     return args;
 #else
-    // Rempli par main sur les autres plateformes.
+    // Filled in by main on other platforms.
     return {};
 #endif
 }
 
-const char* kGeneralHelp = R"HELP(banc — banc d'essai local de modèles GGUF
+const char* kGeneralHelp = R"HELP(waffle — local GGUF model workbench
 
-Usage : banc [--db CHEMIN] COMMANDE [options]
+Usage: waffle [--db PATH] COMMAND [options]
 
-Commandes :
-  scan [dossiers…]     Enregistre les GGUF trouvés (dossiers par défaut sinon)
-  list                 Bibliothèque : nom, quantification, taille, paramètres, contexte, chemin
-  info MODÈLE          Métadonnées principales et octets par type
-  plan MODÈLE          Estimation de VRAM et couches GPU tenables
-  bench MODÈLE         Mesure de vitesse, grille de réglages, sauvegarde
-  history MODÈLE       Historique des mesures de ce modèle
-  campaigns            Campagnes enregistrées
-  export ID            Exporte une campagne (--md par défaut, ou --csv)
-  gpu                  Un échantillon de télémétrie GPU
+Commands:
+  scan [folders...]   Record GGUF files found (default model folders otherwise)
+  list                Library: name, quantization, size, parameters, context, path
+  info MODEL          Main metadata and bytes by type
+  plan MODEL          VRAM estimate and how many GPU layers fit
+  bench MODEL         Speed measurement, settings grid, save
+  history MODEL       Measurement history for this model
+  campaigns           Saved campaigns
+  export ID           Export a campaign (--md by default, or --csv)
+  gpu                 One GPU telemetry sample
 
-  --db CHEMIN          Base SQLite (défaut : %LOCALAPPDATA%\BancLocal\banc.db)
-  --help               Cette aide
+  --db PATH           SQLite database (default: %LOCALAPPDATA%\WaffleIron\waffle.db)
+  --help              This help
 
-MODÈLE est un chemin de fichier ou une sous-chaîne unique du nom en base.
-banc COMMANDE --help   Aide de la commande.
+MODEL is a file path or a unique substring of the name in the database.
+waffle COMMAND --help   Help for that command.
 )HELP";
 
-const char* kScanHelp = "banc scan [dossiers…]\n\nParcourt les dossiers (ou les dossiers de modèles par défaut) et "
-                        "enregistre chaque GGUF.\n";
-const char* kListHelp = "banc list\n\nAffiche la bibliothèque enregistrée dans la base.\n";
+const char* kScanHelp = "waffle scan [folders...]\n\nWalks the folders (or the default model folders) and records each "
+                        "GGUF.\n";
+const char* kListHelp = "waffle list\n\nShows the library stored in the database.\n";
 const char* kInfoHelp =
-    "banc info MODÈLE\n\nLit le fichier et affiche les métadonnées principales, puis les octets par type.\n";
-const char* kPlanHelp = R"HELP(banc plan MODÈLE [options]
+    "waffle info MODEL\n\nReads the file and prints the main metadata, then bytes by type.\n";
+const char* kPlanHelp = R"HELP(waffle plan MODEL [options]
 
-  --ngl N            Couches sur le GPU (-1 = toutes)
-  --ctx N            Taille de contexte
-  --ctk TYPE         Type du cache K (f16, q8_0, …)
-  --ctv TYPE         Type du cache V
+  --ngl N            GPU layers (-1 = all)
+  --ctx N            Context size
+  --ctk TYPE         K cache type (f16, q8_0, ...)
+  --ctv TYPE         V cache type
   --fa 0|1           Flash attention
-  --swa-full 0|1     Cache SWA de la taille du contexte (1, défaut de llama.cpp) ou de la fenêtre seule (0)
-  --budget-gib X     Budget VRAM en Gio (défaut : VRAM libre selon la télémétrie)
-  --verify           Charge réellement le modèle sur le GPU et mesure l'écart avec l'estimation
+  --swa-full 0|1     SWA cache sized to the context (1, llama.cpp default) or to the window only (0)
+  --budget-gib X     VRAM budget in GiB (default: free VRAM from telemetry)
+  --verify           Load the model on the GPU and measure the gap versus the estimate
 )HELP";
-const char* kBenchHelp = R"HELP(banc bench MODÈLE [options]
+const char* kBenchHelp = R"HELP(waffle bench MODEL [options]
 
-Chaque réglage accepte une liste séparée par des virgules (produit cartésien).
+Each setting takes a comma-separated list (Cartesian product).
 
-  --ngl LISTE        Couches GPU, ex. 0,20,99
-  --ctx LISTE        Contextes
-  --ctk LISTE        Types de cache K et V
-  --fa LISTE         Flash attention, 0 ou 1
-  --pp LISTE         Tokens de consigne
-  --tg LISTE         Tokens générés
-  --reps LISTE       Répétitions mesurées
-  --name NOM         Nom de la campagne enregistrée
+  --ngl LIST         GPU layers, e.g. 0,20,99
+  --ctx LIST         Context sizes
+  --ctk LIST         K and V cache types
+  --fa LIST          Flash attention, 0 or 1
+  --pp LIST          Prompt tokens
+  --tg LIST          Generated tokens
+  --reps LIST        Measured repetitions
+  --name NAME        Saved campaign name
 )HELP";
-const char* kHistoryHelp = "banc history MODÈLE\n\nUn point par résultat dont le chemin de chargement est ce modèle, "
-                           "du plus ancien au plus récent.\n";
-const char* kCampaignsHelp = "banc campaigns\n\nListe les campagnes enregistrées.\n";
-const char* kExportHelp = R"HELP(banc export ID [options]
+const char* kHistoryHelp = "waffle history MODEL\n\nOne point per result whose load path is this model, oldest "
+                           "first.\n";
+const char* kCampaignsHelp = "waffle campaigns\n\nLists saved campaigns.\n";
+const char* kExportHelp = R"HELP(waffle export ID [options]
 
-  --md               Markdown (défaut)
+  --md               Markdown (default)
   --csv              CSV
-  -o FICHIER         Écrit le fichier au lieu de la sortie standard
+  -o FILE            Write a file instead of standard output
 )HELP";
-const char* kGpuHelp = "banc gpu\n\nAffiche un échantillon NVML, ou la raison de l'indisponibilité.\n";
+const char* kGpuHelp = "waffle gpu\n\nPrints one NVML sample, or why telemetry is unavailable.\n";
 
 struct Invocation {
     std::optional<std::filesystem::path> db;
@@ -279,10 +279,10 @@ Invocation parse_invocation(const std::vector<std::string>& args) {
     for (size_t i = 0; i < args.size(); ++i) {
         const std::string& arg = args[i];
         if (arg == "--db") {
-            if (i + 1 >= args.size()) throw banc::Error("Valeur manquante pour --db");
+            if (i + 1 >= args.size()) throw waffle::Error("Missing value for --db");
             invocation.db = path_from_utf8(args[++i]);
         } else if (arg.rfind("--db=", 0) == 0) {
-            if (arg.size() == 5) throw banc::Error("Valeur manquante pour --db");
+            if (arg.size() == 5) throw waffle::Error("Missing value for --db");
             invocation.db = path_from_utf8(arg.substr(5));
         } else {
             tokens.push_back(arg);
@@ -290,7 +290,7 @@ Invocation parse_invocation(const std::vector<std::string>& args) {
     }
     if (tokens.empty() || is_help(tokens[0])) {
         invocation.general_help = true;
-        if (tokens.empty()) throw banc::Error("Commande manquante. Essayez : banc --help");
+        if (tokens.empty()) throw waffle::Error("Missing command. Try: waffle --help");
         return invocation;
     }
     invocation.command = tokens[0];
@@ -320,12 +320,12 @@ struct FlagParser {
             std::optional<std::string> value;
             size_t erase_count = 1;
             if (arg == name) {
-                if (i + 1 >= args_.size()) throw banc::Error("Valeur manquante pour " + name);
+                if (i + 1 >= args_.size()) throw waffle::Error("Missing value for " + name);
                 value = args_[i + 1];
                 erase_count = 2;
             } else if (arg.rfind(name + "=", 0) == 0) {
                 value = arg.substr(name.size() + 1);
-                if (value->empty()) throw banc::Error("Valeur manquante pour " + name);
+                if (value->empty()) throw waffle::Error("Missing value for " + name);
             }
             if (value) {
                 args_.erase(args_.begin() + static_cast<std::ptrdiff_t>(i),
@@ -338,7 +338,7 @@ struct FlagParser {
 
     std::vector<std::string> positionals() {
         for (const auto& arg : args_) {
-            if (!arg.empty() && arg[0] == '-') throw banc::Error("Option inconnue : " + arg);
+            if (!arg.empty() && arg[0] == '-') throw waffle::Error("Unknown option: " + arg);
         }
         return args_;
     }
@@ -350,10 +350,10 @@ private:
 struct ResolvedModel {
     std::filesystem::path path;
     std::string key;
-    std::optional<banc::ModelRecord> record;
+    std::optional<waffle::ModelRecord> record;
 };
 
-ResolvedModel resolve_model(banc::Store& store, const std::string& spec) {
+ResolvedModel resolve_model(waffle::Store& store, const std::string& spec) {
     const auto as_path = path_from_utf8(spec);
     std::error_code ec;
     if (std::filesystem::is_regular_file(as_path, ec)) {
@@ -362,107 +362,107 @@ ResolvedModel resolve_model(banc::Store& store, const std::string& spec) {
         return ResolvedModel{path, key, store.find_model(key)};
     }
 
-    std::vector<banc::ModelRecord> hits;
+    std::vector<waffle::ModelRecord> hits;
     for (const auto& model : store.list_models()) {
         if (model.name.find(spec) != std::string::npos || model.file_name.find(spec) != std::string::npos ||
             model.path.find(spec) != std::string::npos)
             hits.push_back(model);
     }
-    if (hits.empty()) throw banc::Error("Modèle introuvable : " + spec);
+    if (hits.empty()) throw waffle::Error("Model not found: " + spec);
     if (hits.size() > 1) {
-        std::string message = "Plusieurs modèles correspondent à « " + spec + " » :";
+        std::string message = "Several models match \"" + spec + "\":";
         const size_t shown = std::min<size_t>(hits.size(), 8);
         for (size_t i = 0; i < shown; ++i) message += "\n  " + hits[i].name + "  " + hits[i].path;
-        if (hits.size() > shown) message += "\n  …";
-        throw banc::Error(message);
+        if (hits.size() > shown) message += "\n  ...";
+        throw waffle::Error(message);
     }
     return ResolvedModel{path_from_utf8(hits[0].path), hits[0].path, hits[0]};
 }
 
-int cmd_scan(banc::Store& store, const std::vector<std::string>& args) {
+int cmd_scan(waffle::Store& store, const std::vector<std::string>& args) {
     FlagParser parser(args);
     const auto positionals = parser.positionals();
     std::vector<std::filesystem::path> roots;
     if (positionals.empty()) {
-        roots = banc::default_model_roots();
+        roots = waffle::default_model_roots();
     } else {
         for (const auto& dir : positionals) roots.push_back(path_from_utf8(dir));
     }
-    const auto files = banc::scan_model_dirs(roots);
+    const auto files = waffle::scan_model_dirs(roots);
     int recorded = 0;
     for (const auto& file : files) {
         try {
             const auto path = normalize_path(file);
-            auto info = banc::read_gguf(path, false);
-            if (!banc::is_language_model(info)) continue;
+            auto info = waffle::read_gguf(path, false);
+            if (!waffle::is_language_model(info)) continue;
             info.path = path;
             store.upsert_model(info);
             ++recorded;
-        } catch (const banc::Error& error) {
+        } catch (const waffle::Error& error) {
             std::cerr << error.what() << '\n';
         }
     }
     if (recorded <= 1)
-        std::cout << recorded << " modèle enregistré\n";
+        std::cout << recorded << " model recorded\n";
     else
-        std::cout << recorded << " modèles enregistrés\n";
+        std::cout << recorded << " models recorded\n";
     return 0;
 }
 
-int cmd_list(banc::Store& store, const std::vector<std::string>& args) {
+int cmd_list(waffle::Store& store, const std::vector<std::string>& args) {
     FlagParser parser(args);
-    if (!parser.positionals().empty()) throw banc::Error("banc list n'accepte pas d'argument");
+    if (!parser.positionals().empty()) throw waffle::Error("waffle list takes no arguments");
     std::vector<std::vector<std::string>> rows;
     for (const auto& model : store.list_models()) {
-        // Fiche enregistrée avant qu'on reconnaisse les modèles draft d'Ollama : on la masque.
-        if (const auto blob = banc::find_ollama_blob(std::filesystem::u8path(model.path)); blob && !blob->model)
+        // Record stored before Ollama draft models were recognized: hide it.
+        if (const auto blob = waffle::find_ollama_blob(std::filesystem::u8path(model.path)); blob && !blob->model)
             continue;
         rows.push_back({model.name, model.file_type, format_bytes(model.file_size), format_count(model.n_params),
                         std::to_string(model.context_length), model.path});
     }
     if (rows.empty()) {
-        std::cout << "Aucun modèle enregistré\n";
+        std::cout << "No model recorded\n";
         return 0;
     }
-    print_table({"Nom", "Quantif", "Taille", "Paramètres", "Contexte", "Chemin"}, rows);
+    print_table({"Name", "Quant", "Size", "Parameters", "Context", "Path"}, rows);
     return 0;
 }
 
-int cmd_info(banc::Store& store, const std::vector<std::string>& args) {
+int cmd_info(waffle::Store& store, const std::vector<std::string>& args) {
     FlagParser parser(args);
     const auto positionals = parser.positionals();
-    if (positionals.size() != 1) throw banc::Error("Usage : banc info MODÈLE");
+    if (positionals.size() != 1) throw waffle::Error("Usage: waffle info MODEL");
     const auto model = resolve_model(store, positionals[0]);
     std::error_code ec;
     if (!std::filesystem::is_regular_file(model.path, ec))
-        throw banc::Error("Fichier de modèle introuvable : " + utf8_from_path(model.path));
-    const banc::ModelInfo info = banc::read_gguf(model.path, true);
-    std::cout << "Nom           " << info.name << '\n'
-              << "Fichier       " << info.file_name << '\n'
-              << "Chemin        " << utf8_from_path(info.path) << '\n'
-              << "Architecture  " << info.architecture << '\n'
-              << "Quantif       " << info.file_type << '\n'
-              << "Taille        " << format_bytes(info.file_size) << '\n'
-              << "Paramètres    " << format_count(info.n_params) << '\n'
-              << "Contexte      " << info.context_length << '\n'
-              << "Couches       " << info.n_layer << '\n'
-              << "Embedding     " << info.n_embd << '\n'
-              << "Têtes         " << info.n_head << " (KV " << info.n_head_kv << ")\n"
-              << "Dim tête K/V  " << info.head_dim_k << " / " << info.head_dim_v << '\n';
-    if (info.sliding_window) std::cout << "Fenêtre       " << info.sliding_window << '\n';
-    if (info.n_expert) std::cout << "Experts       " << info.n_expert << " (actifs " << info.n_expert_used << ")\n";
-    if (model.record && !model.record->notes.empty()) std::cout << "Notes         " << model.record->notes << '\n';
+        throw waffle::Error("Model file not found: " + utf8_from_path(model.path));
+    const waffle::ModelInfo info = waffle::read_gguf(model.path, true);
+    std::cout << "Name            " << info.name << '\n'
+              << "File            " << info.file_name << '\n'
+              << "Path            " << utf8_from_path(info.path) << '\n'
+              << "Architecture    " << info.architecture << '\n'
+              << "Quant           " << info.file_type << '\n'
+              << "Size            " << format_bytes(info.file_size) << '\n'
+              << "Parameters      " << format_count(info.n_params) << '\n'
+              << "Context         " << info.context_length << '\n'
+              << "Layers          " << info.n_layer << '\n'
+              << "Embedding       " << info.n_embd << '\n'
+              << "Heads           " << info.n_head << " (KV " << info.n_head_kv << ")\n"
+              << "Head dim K/V    " << info.head_dim_k << " / " << info.head_dim_v << '\n';
+    if (info.sliding_window) std::cout << "Window          " << info.sliding_window << '\n';
+    if (info.n_expert) std::cout << "Experts         " << info.n_expert << " (active " << info.n_expert_used << ")\n";
+    if (model.record && !model.record->notes.empty()) std::cout << "Notes           " << model.record->notes << '\n';
     if (model.record && !model.record->tags.empty()) {
-        std::cout << "Étiquettes    ";
+        std::cout << "Tags            ";
         for (size_t i = 0; i < model.record->tags.size(); ++i) {
             if (i) std::cout << ", ";
             std::cout << model.record->tags[i];
         }
         std::cout << '\n';
     }
-    std::cout << "Octets par type\n";
+    std::cout << "Bytes by type\n";
     if (info.bytes_by_type.empty()) {
-        std::cout << "  (aucun)\n";
+        std::cout << "  (none)\n";
     } else {
         for (const auto& [type, bytes] : info.bytes_by_type)
             std::cout << "  " << type << "  " << format_bytes(bytes) << '\n';
@@ -470,27 +470,27 @@ int cmd_info(banc::Store& store, const std::vector<std::string>& args) {
     return 0;
 }
 
-void print_estimate(const banc::VramEstimate& estimate) {
-    std::cout << "Poids GPU       " << format_bytes(estimate.weights_gpu) << '\n'
-              << "Poids CPU       " << format_bytes(estimate.weights_cpu) << '\n'
-              << "Cache KV GPU    " << format_bytes(estimate.kv_cache_gpu) << '\n'
-              << "Cache KV CPU    " << format_bytes(estimate.kv_cache_cpu) << '\n'
-              << "Calcul GPU      " << format_bytes(estimate.compute_gpu) << '\n'
-              << "Calcul CPU      " << format_bytes(estimate.compute_cpu) << '\n'
-              << "Réserve GPU     " << format_bytes(estimate.overhead_gpu) << '\n'
-              << "Total GPU       " << format_bytes(estimate.total_gpu()) << '\n'
-              << "Total CPU       " << format_bytes(estimate.total_cpu()) << '\n';
+void print_estimate(const waffle::VramEstimate& estimate) {
+    std::cout << "GPU weights     " << format_bytes(estimate.weights_gpu) << '\n'
+              << "CPU weights     " << format_bytes(estimate.weights_cpu) << '\n'
+              << "KV cache GPU    " << format_bytes(estimate.kv_cache_gpu) << '\n'
+              << "KV cache CPU    " << format_bytes(estimate.kv_cache_cpu) << '\n'
+              << "GPU compute     " << format_bytes(estimate.compute_gpu) << '\n'
+              << "CPU compute     " << format_bytes(estimate.compute_cpu) << '\n'
+              << "GPU reserve     " << format_bytes(estimate.overhead_gpu) << '\n'
+              << "GPU total       " << format_bytes(estimate.total_gpu()) << '\n'
+              << "CPU total       " << format_bytes(estimate.total_cpu()) << '\n';
     for (const auto& note : estimate.notes) std::cout << "Note            " << note << '\n';
 }
 
-// Charge le modèle avec les réglages du plan et compare la VRAM réellement prise à l'estimation.
-void verify_plan(banc::Store& store, const std::filesystem::path& path, const banc::VramPlanInput& input,
-                 const banc::VramEstimate& estimate) {
-    banc::Telemetry telemetry;
+// Load the model with the plan settings and compare measured VRAM with the estimate.
+void verify_plan(waffle::Store& store, const std::filesystem::path& path, const waffle::VramPlanInput& input,
+                 const waffle::VramEstimate& estimate) {
+    waffle::Telemetry telemetry;
     const auto before = telemetry.sample();
-    if (!before) throw banc::Error("Vérification impossible : " + telemetry.error());
+    if (!before) throw waffle::Error("Cannot verify: " + telemetry.error());
 
-    banc::LoadParams params;
+    waffle::LoadParams params;
     params.model_path = path;
     params.n_gpu_layers = input.n_gpu_layers;
     params.n_ctx = input.n_ctx;
@@ -502,8 +502,8 @@ void verify_plan(banc::Store& store, const std::filesystem::path& path, const ba
     params.n_seq_max = input.n_seq;
     params.swa_full = input.swa_full;
 
-    banc::Engine engine;
-    // Garde les lignes où llama.cpp annonce ses allocations : utiles pour comprendre un écart.
+    waffle::Engine engine;
+    // Keep the lines where llama.cpp reports its allocations: they explain a gap.
     std::vector<std::string> allocations;
     std::mutex allocations_mutex;
     engine.set_log_sink([&](int, std::string_view text) {
@@ -516,10 +516,10 @@ void verify_plan(banc::Store& store, const std::filesystem::path& path, const ba
     });
     uint64_t measured = 0;
     engine
-        .submit([&](banc::EngineSession& session) {
+        .submit([&](waffle::EngineSession& session) {
             session.load(params);
-            // Un premier décodage alloue les tampons de calcul définitifs.
-            const auto tokens = session.tokenize("Bonjour", true);
+            // A first decode allocates the final compute buffers.
+            const auto tokens = session.tokenize("Hello", true);
             session.decode(tokens, 0);
             if (const auto after = telemetry.sample())
                 measured = after->vram_used > before->vram_used ? after->vram_used - before->vram_used : 0;
@@ -533,25 +533,25 @@ void verify_plan(banc::Store& store, const std::filesystem::path& path, const ba
                                  : 0.0;
     std::ostringstream gap_text;
     gap_text << std::showpos << std::fixed << std::setprecision(1) << gap << " %";
-    std::cout << "Mesuré GPU      " << format_bytes(measured) << '\n'
-              << "Écart           " << gap_text.str() << " (mesure - estimation)\n";
+    std::cout << "Measured GPU    " << format_bytes(measured) << '\n'
+              << "Gap             " << gap_text.str() << " (measured - estimate)\n";
     if (!allocations.empty()) {
-        std::cout << "Allocations annoncées par llama.cpp :\n";
+        std::cout << "Allocations reported by llama.cpp:\n";
         for (const auto& line : allocations) std::cout << "  " << line << '\n';
     }
 
-    banc::VramCheck check;
+    waffle::VramCheck check;
     check.model_path = utf8_from_path(path);
     check.timestamp = now_iso();
     check.config = "ngl=" + std::to_string(input.n_gpu_layers) + " ctx=" + std::to_string(input.n_ctx) +
                    " kv=" + input.type_k + "/" + input.type_v + " fa=" + (input.flash_attn ? "on" : "off") +
-                   (input.swa_full ? "" : " swa=fenêtre");
+                   (input.swa_full ? "" : " swa=window");
     check.estimated_gpu = estimated;
     check.measured_gpu = measured;
     store.save_vram_check(check);
 }
 
-int cmd_plan(banc::Store& store, const std::vector<std::string>& args) {
+int cmd_plan(waffle::Store& store, const std::vector<std::string>& args) {
     FlagParser parser(args);
     const auto ngl = parser.take_value("--ngl");
     const auto ctx = parser.take_value("--ctx");
@@ -562,51 +562,51 @@ int cmd_plan(banc::Store& store, const std::vector<std::string>& args) {
     const auto budget_text = parser.take_value("--budget-gib");
     const bool verify = parser.take_flag("--verify");
     const auto positionals = parser.positionals();
-    if (positionals.size() != 1) throw banc::Error("Usage : banc plan MODÈLE [options]");
+    if (positionals.size() != 1) throw waffle::Error("Usage: waffle plan MODEL [options]");
     const auto model = resolve_model(store, positionals[0]);
     std::error_code ec;
     if (!std::filesystem::is_regular_file(model.path, ec))
-        throw banc::Error("Fichier de modèle introuvable : " + utf8_from_path(model.path));
+        throw waffle::Error("Model file not found: " + utf8_from_path(model.path));
 
-    banc::VramPlanInput input;
+    waffle::VramPlanInput input;
     if (ngl) input.n_gpu_layers = static_cast<int>(parse_integer(*ngl, "--ngl"));
     if (ctx) input.n_ctx = parse_u32_at_least(*ctx, "--ctx", 1);
     if (ctk) input.type_k = *ctk;
     if (ctv) input.type_v = *ctv;
     if (fa) {
         const long long value = parse_integer(*fa, "--fa");
-        if (value != 0 && value != 1) throw banc::Error("--fa attend 0 ou 1");
+        if (value != 0 && value != 1) throw waffle::Error("--fa expects 0 or 1");
         input.flash_attn = value == 1;
     }
     if (swa_full) {
         const long long value = parse_integer(*swa_full, "--swa-full");
-        if (value != 0 && value != 1) throw banc::Error("--swa-full attend 0 ou 1");
+        if (value != 0 && value != 1) throw waffle::Error("--swa-full expects 0 or 1");
         input.swa_full = value == 1;
     }
 
-    const banc::ModelInfo info = banc::read_gguf(model.path, true);
-    const banc::VramEstimate estimate = banc::estimate_vram(info, input);
+    const waffle::ModelInfo info = waffle::read_gguf(model.path, true);
+    const waffle::VramEstimate estimate = waffle::estimate_vram(info, input);
     print_estimate(estimate);
 
     std::optional<uint64_t> budget;
     if (budget_text) {
         const double gib = parse_double(*budget_text, "--budget-gib");
-        if (!(gib > 0)) throw banc::Error("--budget-gib doit être positif");
-        budget = static_cast<uint64_t>(gib * static_cast<double>(banc::GiB));
+        if (!(gib > 0)) throw waffle::Error("--budget-gib must be positive");
+        budget = static_cast<uint64_t>(gib * static_cast<double>(waffle::GiB));
         std::cout << "Budget          " << format_bytes(*budget) << '\n';
     } else {
-        banc::Telemetry telemetry;
+        waffle::Telemetry telemetry;
         if (const auto sample = telemetry.sample()) {
-            // Ce que les autres programmes occupent déjà n'est pas disponible pour le modèle.
+            // VRAM already taken by other programs is not available for the model.
             budget = sample->vram_total - std::min(sample->vram_used, sample->vram_total);
-            std::cout << "Budget          " << format_bytes(*budget) << " (VRAM libre)\n";
+            std::cout << "Budget          " << format_bytes(*budget) << " (free VRAM)\n";
         } else {
-            std::cout << "Budget          indisponible : " << telemetry.error() << '\n';
+            std::cout << "Budget          unavailable: " << telemetry.error() << '\n';
         }
     }
     if (budget) {
-        const int layers = banc::max_gpu_layers_for(info, input, *budget);
-        std::cout << "Couches GPU max " << layers << '\n';
+        const int layers = waffle::max_gpu_layers_for(info, input, *budget);
+        std::cout << "Max GPU layers  " << layers << '\n';
     }
     if (verify) verify_plan(store, model.path, input, estimate);
     return 0;
@@ -622,7 +622,7 @@ bool show_progress(float fraction, const std::string& label) {
     return true;
 }
 
-int cmd_bench(banc::Store& store, const std::vector<std::string>& args) {
+int cmd_bench(waffle::Store& store, const std::vector<std::string>& args) {
     FlagParser parser(args);
     const auto ngl_text = parser.take_value("--ngl");
     const auto ctx_text = parser.take_value("--ctx");
@@ -633,13 +633,13 @@ int cmd_bench(banc::Store& store, const std::vector<std::string>& args) {
     const auto reps_text = parser.take_value("--reps");
     const auto name_text = parser.take_value("--name");
     const auto positionals = parser.positionals();
-    if (positionals.size() != 1) throw banc::Error("Usage : banc bench MODÈLE [options]");
+    if (positionals.size() != 1) throw waffle::Error("Usage: waffle bench MODEL [options]");
     const auto model = resolve_model(store, positionals[0]);
     std::error_code ec;
     if (!std::filesystem::is_regular_file(model.path, ec))
-        throw banc::Error("Fichier de modèle introuvable : " + utf8_from_path(model.path));
+        throw waffle::Error("Model file not found: " + utf8_from_path(model.path));
 
-    banc::CampaignGrid grid;
+    waffle::CampaignGrid grid;
     grid.base.load.model_path = model.path;
     if (ngl_text) {
         for (const auto& part : split_comma(*ngl_text, "--ngl"))
@@ -659,7 +659,7 @@ int cmd_bench(banc::Store& store, const std::vector<std::string>& args) {
     if (fa_text) {
         for (const auto& part : split_comma(*fa_text, "--fa")) {
             const long long value = parse_integer(part, "--fa");
-            if (value != 0 && value != 1) throw banc::Error("--fa attend 0 ou 1");
+            if (value != 0 && value != 1) throw waffle::Error("--fa expects 0 or 1");
             grid.flash_attn.push_back(static_cast<int>(value));
         }
         grid.base.load.flash_attn = grid.flash_attn.front();
@@ -680,25 +680,25 @@ int cmd_bench(banc::Store& store, const std::vector<std::string>& args) {
         repetitions.clear();
         for (const auto& part : split_comma(*reps_text, "--reps")) {
             const long long value = parse_integer(part, "--reps");
-            if (value < 1) throw banc::Error("--reps doit être au moins 1");
+            if (value < 1) throw waffle::Error("--reps must be at least 1");
             repetitions.push_back(static_cast<int>(value));
         }
     }
 
-    banc::Engine engine;
-    banc::Telemetry telemetry;
-    banc::Telemetry* telemetry_ptr = telemetry.available() ? &telemetry : nullptr;
-    std::vector<banc::BenchResult> results;
+    waffle::Engine engine;
+    waffle::Telemetry telemetry;
+    waffle::Telemetry* telemetry_ptr = telemetry.available() ? &telemetry : nullptr;
+    std::vector<waffle::BenchResult> results;
     std::vector<std::string> errors;
     bool printed = false;
     for (uint32_t n_prompt : prompts) {
         for (uint32_t n_gen : generated) {
             for (int reps : repetitions) {
-                banc::CampaignGrid one = grid;
+                waffle::CampaignGrid one = grid;
                 one.base.n_prompt = n_prompt;
                 one.base.n_gen = n_gen;
                 one.base.repetitions = reps;
-                auto batch = banc::run_campaign(engine, telemetry_ptr, one, show_progress, &errors);
+                auto batch = waffle::run_campaign(engine, telemetry_ptr, one, show_progress, &errors);
                 printed = true;
                 results.insert(results.end(), std::make_move_iterator(batch.begin()),
                                std::make_move_iterator(batch.end()));
@@ -707,26 +707,26 @@ int cmd_bench(banc::Store& store, const std::vector<std::string>& args) {
     }
     if (printed) std::cerr << '\n';
     for (const auto& error : errors) std::cerr << error << '\n';
-    if (results.empty()) throw banc::Error("Aucune mesure enregistrée");
+    if (results.empty()) throw waffle::Error("No measurement recorded");
 
-    std::string markdown = banc::to_markdown(results);
+    std::string markdown = waffle::to_markdown(results);
     if (markdown.empty() || markdown.back() != '\n') markdown.push_back('\n');
     std::cout << markdown;
 
-    const std::string name = name_text && !name_text->empty() ? *name_text : "banc " + now_iso();
+    const std::string name = name_text && !name_text->empty() ? *name_text : "waffle " + now_iso();
     const int64_t id = store.save_campaign(name, results);
-    std::cerr << "Campagne " << id << " enregistrée (" << name << ")\n";
+    std::cerr << "Campaign " << id << " saved (" << name << ")\n";
     return errors.empty() ? 0 : 1;
 }
 
-int cmd_history(banc::Store& store, const std::vector<std::string>& args) {
+int cmd_history(waffle::Store& store, const std::vector<std::string>& args) {
     FlagParser parser(args);
     const auto positionals = parser.positionals();
-    if (positionals.size() != 1) throw banc::Error("Usage : banc history MODÈLE");
+    if (positionals.size() != 1) throw waffle::Error("Usage: waffle history MODEL");
     const auto model = resolve_model(store, positionals[0]);
     const auto points = store.history(model.key);
     if (points.empty()) {
-        std::cout << "Aucune mesure pour ce modèle\n";
+        std::cout << "No measurements for this model\n";
         return 0;
     }
     std::vector<std::vector<std::string>> rows;
@@ -743,12 +743,12 @@ int cmd_history(banc::Store& store, const std::vector<std::string>& args) {
     return 0;
 }
 
-int cmd_campaigns(banc::Store& store, const std::vector<std::string>& args) {
+int cmd_campaigns(waffle::Store& store, const std::vector<std::string>& args) {
     FlagParser parser(args);
-    if (!parser.positionals().empty()) throw banc::Error("banc campaigns n'accepte pas d'argument");
+    if (!parser.positionals().empty()) throw waffle::Error("waffle campaigns takes no arguments");
     const auto campaigns = store.list_campaigns();
     if (campaigns.empty()) {
-        std::cout << "Aucune campagne\n";
+        std::cout << "No campaign\n";
         return 0;
     }
     std::vector<std::vector<std::string>> rows;
@@ -756,22 +756,22 @@ int cmd_campaigns(banc::Store& store, const std::vector<std::string>& args) {
         rows.push_back({std::to_string(campaign.id), campaign.created_at, std::to_string(campaign.n_results),
                         campaign.model_names, campaign.name});
     }
-    print_table({"Id", "Date", "Résultats", "Modèles", "Nom"}, rows);
+    print_table({"Id", "Date", "Results", "Models", "Name"}, rows);
     return 0;
 }
 
-int cmd_export(banc::Store& store, const std::vector<std::string>& args) {
+int cmd_export(waffle::Store& store, const std::vector<std::string>& args) {
     FlagParser parser(args);
     const bool csv = parser.take_flag("--csv");
     const bool markdown = parser.take_flag("--md");
-    if (csv && markdown) throw banc::Error("Choisir --csv ou --md");
+    if (csv && markdown) throw waffle::Error("Choose --csv or --md");
     const auto out = parser.take_value("-o");
     const auto positionals = parser.positionals();
-    if (positionals.size() != 1) throw banc::Error("Usage : banc export ID [--csv|--md] [-o FICHIER]");
+    if (positionals.size() != 1) throw waffle::Error("Usage: waffle export ID [--csv|--md] [-o FILE]");
     const long long id_value = parse_integer(positionals[0], "ID");
-    if (id_value < 1) throw banc::Error("Identifiant de campagne invalide");
+    if (id_value < 1) throw waffle::Error("Invalid campaign id");
     const auto results = store.load_campaign(id_value);
-    std::string text = csv ? banc::to_csv(results) : banc::to_markdown(results);
+    std::string text = csv ? waffle::to_csv(results) : waffle::to_markdown(results);
     if (!text.empty() && text.back() != '\n') text.push_back('\n');
     if (!out) {
         std::cout << text;
@@ -781,34 +781,34 @@ int cmd_export(banc::Store& store, const std::vector<std::string>& args) {
     if (!path.parent_path().empty()) {
         std::error_code ec;
         std::filesystem::create_directories(path.parent_path(), ec);
-        if (ec) throw banc::Error("Impossible de créer le dossier : " + utf8_from_path(path.parent_path()));
+        if (ec) throw waffle::Error("Cannot create the folder: " + utf8_from_path(path.parent_path()));
     }
     std::ofstream file(path, std::ios::binary);
-    if (!file) throw banc::Error("Impossible d'écrire : " + utf8_from_path(path));
+    if (!file) throw waffle::Error("Cannot write: " + utf8_from_path(path));
     file << text;
-    if (!file) throw banc::Error("Impossible d'écrire : " + utf8_from_path(path));
+    if (!file) throw waffle::Error("Cannot write: " + utf8_from_path(path));
     return 0;
 }
 
 int cmd_gpu() {
-    banc::Telemetry telemetry;
+    waffle::Telemetry telemetry;
     if (!telemetry.available()) {
-        std::cout << "Télémétrie indisponible : " << telemetry.error() << '\n';
+        std::cout << "Telemetry unavailable: " << telemetry.error() << '\n';
         return 0;
     }
     const auto sample = telemetry.sample();
     if (!sample) {
-        std::cout << "Télémétrie indisponible : " << telemetry.error() << '\n';
+        std::cout << "Telemetry unavailable: " << telemetry.error() << '\n';
         return 0;
     }
-    std::cout << "Carte           " << telemetry.device_name() << '\n'
-              << "Utilisation     " << sample->gpu_util_pct << " %\n"
-              << "Mémoire         " << sample->mem_util_pct << " %\n"
+    std::cout << "Device          " << telemetry.device_name() << '\n'
+              << "Utilization     " << sample->gpu_util_pct << " %\n"
+              << "Memory          " << sample->mem_util_pct << " %\n"
               << "VRAM            " << format_bytes(sample->vram_used) << " / " << format_bytes(sample->vram_total)
               << '\n'
-              << "Température     " << sample->temperature_c << " °C\n"
-              << "Puissance       " << std::fixed << std::setprecision(1) << sample->power_w << " W\n"
-              << "Horloge SM      " << sample->sm_clock_mhz << " MHz\n";
+              << "Temperature     " << sample->temperature_c << " °C\n"
+              << "Power           " << std::fixed << std::setprecision(1) << sample->power_w << " W\n"
+              << "SM clock        " << sample->sm_clock_mhz << " MHz\n";
     return 0;
 }
 
@@ -835,16 +835,16 @@ int dispatch(const Invocation& invocation) {
             std::cout << text;
             return 0;
         }
-        throw banc::Error("Commande inconnue : " + command);
+        throw waffle::Error("Unknown command: " + command);
     }
     if (command == "gpu") {
         FlagParser parser(invocation.args);
-        if (!parser.positionals().empty()) throw banc::Error("banc gpu n'accepte pas d'argument");
+        if (!parser.positionals().empty()) throw waffle::Error("waffle gpu takes no arguments");
         return cmd_gpu();
     }
-    if (!help_of()) throw banc::Error("Commande inconnue : " + command + ". Essayez : banc --help");
+    if (!help_of()) throw waffle::Error("Unknown command: " + command + ". Try: waffle --help");
 
-    banc::Store store(invocation.db ? *invocation.db : banc::Store::default_path());
+    waffle::Store store(invocation.db ? *invocation.db : waffle::Store::default_path());
     if (command == "scan") return cmd_scan(store, invocation.args);
     if (command == "list") return cmd_list(store, invocation.args);
     if (command == "info") return cmd_info(store, invocation.args);
@@ -853,7 +853,7 @@ int dispatch(const Invocation& invocation) {
     if (command == "history") return cmd_history(store, invocation.args);
     if (command == "campaigns") return cmd_campaigns(store, invocation.args);
     if (command == "export") return cmd_export(store, invocation.args);
-    throw banc::Error("Commande inconnue : " + command);
+    throw waffle::Error("Unknown command: " + command);
 }
 
 } // namespace
@@ -874,11 +874,11 @@ int main(int argc, char** argv) {
             return 0;
         }
         return dispatch(parse_invocation(args));
-    } catch (const banc::Error& error) {
+    } catch (const waffle::Error& error) {
         std::cerr << error.what() << '\n';
         return 1;
     } catch (const std::exception& error) {
-        std::cerr << "Erreur : " << error.what() << '\n';
+        std::cerr << "Error: " << error.what() << '\n';
         return 1;
     }
 }

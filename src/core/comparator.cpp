@@ -10,7 +10,7 @@
 #include <memory>
 #include <span>
 
-namespace banc {
+namespace waffle {
 namespace {
 using Clock = std::chrono::steady_clock;
 double seconds(Clock::time_point start) {
@@ -33,10 +33,10 @@ void progress_or_cancel(Engine& engine, const ProgressFn& progress, float f, con
 double compute_perplexity(EngineSession& session, std::string_view text, uint32_t n_ctx) {
     const auto& info = session.info();
     auto tokens = session.tokenize(text, true);
-    // Au moins deux fenêtres de 16 tokens ; réduire la fenêtre pour les petits corpus.
+    // At least two windows of 16 tokens; shrink the window for small corpora.
     const auto window = std::min<size_t>({n_ctx, info.n_ctx, tokens.size() / 2});
-    if (window < 16) throw Error("La perplexité exige au moins deux fenêtres de 16 tokens et un contexte de 16 tokens");
-    if (!info.params.n_batch) throw Error("La taille de lot doit être positive");
+    if (window < 16) throw Error("Perplexity needs at least two windows of 16 tokens and a context of 16 tokens");
+    if (!info.params.n_batch) throw Error("Batch size must be positive");
     Batch batch(static_cast<int>(std::min<size_t>(window, info.params.n_batch)));
     double nll = 0;
     size_t count = 0;
@@ -44,7 +44,7 @@ double compute_perplexity(EngineSession& session, std::string_view text, uint32_
     for (size_t start = 0; start + window <= tokens.size(); start += window) {
         session.throw_if_stopped();
         session.clear_memory();
-        // Comme llama-perplexity, chaque fenêtre commence par BOS si le modèle le demande.
+        // As in llama-perplexity, each window starts with BOS when the model requests it.
         if (llama_vocab_get_add_bos(session.vocab())) tokens[start] = llama_vocab_bos(session.vocab());
         for (size_t pos = 0; pos < window; pos += info.params.n_batch) {
             session.throw_if_stopped();
@@ -61,11 +61,11 @@ double compute_perplexity(EngineSession& session, std::string_view text, uint32_
             const auto rc = llama_decode(session.ctx(), b);
             session.throw_if_stopped();
             if (rc == 2) throw Cancelled();
-            if (rc != 0) throw Error("Échec du décodage de perplexité (code " + std::to_string(rc) + ")");
+            if (rc != 0) throw Error("Perplexity decode failed (code " + std::to_string(rc) + ")");
             for (int i = 0; i < b.n_tokens; ++i) {
                 if (!b.logits[i]) continue;
                 const float* logits = llama_get_logits_ith(session.ctx(), i);
-                if (!logits) throw Error("Logits de perplexité indisponibles");
+                if (!logits) throw Error("Perplexity logits unavailable");
                 const double maximum = *std::max_element(logits, logits + session.n_vocab());
                 double sum = 0;
                 for (int t = 0; t < session.n_vocab(); ++t) sum += std::exp(double(logits[t]) - maximum);
@@ -76,7 +76,7 @@ double compute_perplexity(EngineSession& session, std::string_view text, uint32_
         }
     }
     const double result = std::exp(nll / static_cast<double>(count));
-    if (!std::isfinite(result)) throw Error("Perplexité non finie : logits ou corpus invalides");
+    if (!std::isfinite(result)) throw Error("Non-finite perplexity: invalid logits or corpus");
     return result;
 }
 
@@ -84,9 +84,9 @@ CompareOutput generate_side(EngineSession& session, const CompareRequest& req,
                             const std::function<void(const std::string&)>& on_token) {
     const auto& info = session.info();
     if (req.max_tokens < 0 || !std::isfinite(req.temperature) || req.temperature < 0)
-        throw Error("Nombre de tokens ou température invalide");
+        throw Error("Invalid token count or temperature");
     auto prompt = session.tokenize(session.apply_chat_template(req.prompt), true);
-    if (prompt.empty() || prompt.size() > info.n_ctx) throw Error("La consigne est vide ou dépasse le contexte");
+    if (prompt.empty() || prompt.size() > info.n_ctx) throw Error("Prompt is empty or longer than the context");
     Sampler sampler(llama_sampler_chain_init(llama_sampler_chain_default_params()), llama_sampler_free);
     if (req.temperature == 0)
         llama_sampler_chain_add(sampler.get(), llama_sampler_init_greedy());
@@ -114,7 +114,7 @@ CompareOutput generate_side(EngineSession& session, const CompareRequest& req,
         llama_synchronize(session.ctx());
         output.text += piece;
         ++output.n_generated;
-        // Callback exécuté sur le thread du moteur : l'appelant synchronise ses données d'affichage.
+        // Callback runs on the engine thread: the caller synchronizes its display data.
         if (on_token) on_token(piece);
     }
     output.tg_tps = output.n_generated ? output.n_generated / seconds(tg_start) : 0;
@@ -128,19 +128,19 @@ CompareResult run_compare(Engine& engine, Telemetry* telemetry, const CompareReq
     const CompareSide* sides[] = {&req.a, &req.b};
     CompareOutput* outputs[] = {&result.a, &result.b};
     for (int i = 0; i < 2; ++i) {
-        progress_or_cancel(engine, progress, static_cast<float>(i) / 2, "Comparaison " + sides[i]->label);
+        progress_or_cancel(engine, progress, static_cast<float>(i) / 2, "Comparing " + sides[i]->label);
         *outputs[i] = engine
                           .submit([&, i](EngineSession& s) {
                               CompareOutput out;
                               out.label = sides[i]->label;
-                              // Même en cas d'erreur, libérer les poids avant de tenter l'autre côté.
+                              // Even on error, release the weights before trying the other side.
                               struct Unload {
                                   EngineSession& session;
                                   ~Unload() { session.unload(); }
                               } unload{s};
                               std::unique_ptr<VramPeakWatcher> watcher;
                               try {
-                                  engine.set_status("Comparaison " + sides[i]->label);
+                                  engine.set_status("Comparing " + sides[i]->label);
                                   if (telemetry) watcher = std::make_unique<VramPeakWatcher>(*telemetry);
                                   s.unload();
                                   const auto& info = s.load(sides[i]->load);
@@ -160,7 +160,7 @@ CompareResult run_compare(Engine& engine, Telemetry* telemetry, const CompareReq
                           })
                           .get();
     }
-    progress_or_cancel(engine, progress, 1, "Comparaison terminée");
+    progress_or_cancel(engine, progress, 1, "Comparison finished");
     return result;
 }
-} // namespace banc
+} // namespace waffle

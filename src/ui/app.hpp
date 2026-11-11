@@ -2,7 +2,7 @@
 #include "ui/view.hpp"
 #include <imgui.h>
 #include <array>
-namespace banc::ui {
+namespace waffle::ui {
 class App {
 public:
     explicit App(bool icons = false);
@@ -22,4 +22,4 @@ private:
     bool quit_ = false, about_ = false, icons_ = false;
     double last_sample_ = -1;
 };
-} // namespace banc::ui
+} // namespace waffle::ui

@@ -1,15 +1,15 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-  Installe Banc Local sous Windows et ouvre l'interface.
+  Install Waffle Iron on Windows and open the interface.
 .DESCRIPTION
-  Point d'entrée de install.cmd et lancer.cmd. Windows PowerShell 5.1.
-  -AutoTest vérifie la logique de choix CPU/CUDA sans rien compiler.
+  Entry point for install.cmd and launch.cmd. Windows PowerShell 5.1.
+  -AutoTest checks the CPU/CUDA selection logic without compiling anything.
 #>
 param(
-    [switch]$Aide,
-    [switch]$Lancer,
-    [switch]$SansLancement,
+    [switch]$Help,
+    [switch]$Launch,
+    [switch]$NoLaunch,
     [switch]$Cpu,
     [switch]$Cuda,
     [switch]$Tests,
@@ -87,13 +87,13 @@ function Parse-ArchitectureRequest([string]$Text) {
             return [pscustomobject]@{
                 Ok = $false
                 ArchitectureText = ''
-                Error = ("Architecture CUDA invalide : " + $part + ". Exemples : 89 ou 8.9.")
+                Error = ("Invalid CUDA architecture: " + $part + ". Examples: 89 or 8.9.")
             }
         }
         if (-not $list.Contains($arch)) { [void]$list.Add($arch) }
     }
     if ($list.Count -eq 0) {
-        return [pscustomobject]@{ Ok = $false; ArchitectureText = ''; Error = "Architecture CUDA vide." }
+        return [pscustomobject]@{ Ok = $false; ArchitectureText = ''; Error = "Empty CUDA architecture." }
     }
     return [pscustomobject]@{ Ok = $true; ArchitectureText = (Format-Architectures @($list.ToArray())); Error = '' }
 }
@@ -121,13 +121,13 @@ function Get-CudaToolkitWarning {
         if ([int]::TryParse($part, [ref]$value) -and $value -gt $max) { $max = $value }
     }
     if ($max -ge 100 -and $Toolkit -lt [version]'12.8') {
-        return ("sm_" + $max + " demande un CUDA Toolkit 12.8 ou plus récent (détecté : " + $Toolkit + ").")
+        return ("sm_" + $max + " requires CUDA Toolkit 12.8 or newer (detected: " + $Toolkit + ").")
     }
     if ($max -ge 89 -and $Toolkit -lt [version]'11.8') {
-        return ("sm_" + $max + " demande un CUDA Toolkit 11.8 ou plus récent (détecté : " + $Toolkit + ").")
+        return ("sm_" + $max + " requires CUDA Toolkit 11.8 or newer (detected: " + $Toolkit + ").")
     }
     if ($max -ge 80 -and $Toolkit -lt [version]'11.1') {
-        return ("sm_" + $max + " demande un CUDA Toolkit 11.1 ou plus récent (détecté : " + $Toolkit + ").")
+        return ("sm_" + $max + " requires CUDA Toolkit 11.1 or newer (detected: " + $Toolkit + ").")
     }
     return $null
 }
@@ -142,8 +142,8 @@ function New-Plan {
         [string]$Note,
         [bool]$WriteUserPreset
     )
-    $exe = 'build\cpu-release\BancLocal.exe'
-    if ($Preset) { $exe = 'build\' + $Preset + '\BancLocal.exe' }
+    $exe = 'build\cpu-release\WaffleIron.exe'
+    if ($Preset) { $exe = 'build\' + $Preset + '\WaffleIron.exe' }
     return [pscustomobject]@{
         Ok = $Ok
         Error = $Message
@@ -166,21 +166,21 @@ function Select-InstallPlan {
         [string[]]$GpuLabels
     )
     if ($ForceCpu -and $ForceCuda) {
-        return (New-Plan $false "Choisissez un seul mode : -Cpu ou -Cuda." '' '' '' '' $false)
+        return (New-Plan $false "Choose only one mode: -Cpu or -Cuda." '' '' '' '' $false)
     }
     $requested = Parse-ArchitectureRequest $RequestedArchitecture
     if (-not $requested.Ok) {
         return (New-Plan $false $requested.Error '' '' '' '' $false)
     }
     if ($ForceCpu -and $requested.ArchitectureText) {
-        return (New-Plan $false "-Architecture ne s'utilise pas avec -Cpu." '' '' '' '' $false)
+        return (New-Plan $false "-Architecture cannot be used with -Cpu." '' '' '' '' $false)
     }
     if (($ForceCuda -or $requested.ArchitectureText) -and -not $HasCudaToolkit) {
-        $why = "Installez le CUDA Toolkit, puis relancez install.cmd :`r`nhttps://developer.nvidia.com/cuda-downloads"
+        $why = "Install the CUDA Toolkit, then run install.cmd again:`r`nhttps://developer.nvidia.com/cuda-downloads"
         if ($ForceCuda) {
-            $why = "L'option -Cuda demande le CUDA Toolkit (nvcc), qui est introuvable.`r`n" + $why
+            $why = "The -Cuda option requires the CUDA Toolkit (nvcc), which was not found.`r`n" + $why
         } else {
-            $why = "Une architecture CUDA est demandée, mais nvcc est introuvable.`r`n" + $why
+            $why = "A CUDA architecture was requested, but nvcc was not found.`r`n" + $why
         }
         return (New-Plan $false $why '' '' '' '' $false)
     }
@@ -191,40 +191,40 @@ function Select-InstallPlan {
     $labelText = $labels -join ', '
 
     if ($ForceCpu) {
-        return (New-Plan $true '' 'cpu' 'cpu-release' '' "Compilation CPU (option -Cpu)." $false)
+        return (New-Plan $true '' 'cpu' 'cpu-release' '' "CPU build (-Cpu)." $false)
     }
     if ($HasCudaToolkit -and ($ForceCuda -or $archText)) {
         if ($archText) {
-            $note = "Compilation CUDA pour sm_" + (($archText -split ';') -join ', sm_') + "."
-            if ($labelText) { $note += " Carte : " + $labelText + "." }
+            $note = "CUDA build for sm_" + (($archText -split ';') -join ', sm_') + "."
+            if ($labelText) { $note += " GPU: " + $labelText + "." }
             if ($requested.ArchitectureText -and $detectedText -and $requested.ArchitectureText -ne $detectedText) {
-                $note += " L'option -Architecture remplace la détection (" + $detectedText + ")."
+                $note += " The -Architecture option overrides detection (" + $detectedText + ")."
             }
             return (New-Plan $true '' 'cuda' 'cuda-release-local' $archText $note $true)
         }
-        $note = "Compilation CUDA avec l'architecture du preset cuda-release (sm_89) : la carte n'a pas été identifiée. Utilisez -Architecture 86 pour en imposer une autre."
+        $note = "CUDA build using the cuda-release preset architecture (sm_89): the GPU was not identified. Use -Architecture 86 to set another one."
         return (New-Plan $true '' 'cuda' 'cuda-release' '' $note $false)
     }
     if ($labelText) {
-        $note = "Carte NVIDIA détectée (" + $labelText + "), mais le CUDA Toolkit est absent : compilation CPU. Installez le CUDA Toolkit puis relancez install.cmd pour un build GPU.`r`nhttps://developer.nvidia.com/cuda-downloads"
+        $note = "NVIDIA GPU detected (" + $labelText + "), but the CUDA Toolkit is missing: CPU build. Install the CUDA Toolkit, then run install.cmd again for a GPU build.`r`nhttps://developer.nvidia.com/cuda-downloads"
         return (New-Plan $true '' 'cpu' 'cpu-release' '' $note $false)
     }
     if ($HasCudaToolkit) {
-        $note = "CUDA Toolkit présent, aucune carte NVIDIA détectée : compilation CPU. Pour forcer le preset cuda-release (sm_89), relancez avec -Cuda."
+        $note = "CUDA Toolkit present, no NVIDIA GPU detected: CPU build. To force the cuda-release preset (sm_89), run again with -Cuda."
         return (New-Plan $true '' 'cpu' 'cpu-release' '' $note $false)
     }
-    return (New-Plan $true '' 'cpu' 'cpu-release' '' "Aucune carte NVIDIA ni CUDA Toolkit : compilation CPU." $false)
+    return (New-Plan $true '' 'cpu' 'cpu-release' '' "No NVIDIA GPU and no CUDA Toolkit: CPU build." $false)
 }
 
 function New-CudaUserPresetJson {
     param([string]$ArchitectureText, [string]$Summary)
     $arch = ConvertTo-JsonString $ArchitectureText
-    $display = ConvertTo-JsonString ("CUDA, Release (install.cmd : " + $Summary + ")")
+    $display = ConvertTo-JsonString ("CUDA, Release (install.cmd: " + $Summary + ")")
     $lines = @(
         '{',
         '  "version": 6,',
         '  "vendor": {',
-        '    "banc.local/install/1.0": { "generated": true }',
+        '    "waffle.iron/install/1.0": { "generated": true }',
         '  },',
         '  "configurePresets": [',
         '    {',
@@ -249,7 +249,7 @@ function Assert-Equal {
     $left = if ($null -eq $Actual) { '<null>' } else { [string]$Actual }
     $right = if ($null -eq $Expected) { '<null>' } else { [string]$Expected }
     if ($left -ne $right) {
-        Write-Host ("ECHEC " + $Name + " : obtenu [" + $left + "] attendu [" + $right + "]") -ForegroundColor Red
+        Write-Host ("FAIL " + $Name + ": got [" + $left + "] expected [" + $right + "]") -ForegroundColor Red
         $script:TestFailures++
     }
 }
@@ -257,7 +257,7 @@ function Assert-Equal {
 function Assert-True {
     param([string]$Name, $Condition)
     if (-not $Condition) {
-        Write-Host ("ECHEC " + $Name) -ForegroundColor Red
+        Write-Host ("FAIL " + $Name) -ForegroundColor Red
         $script:TestFailures++
     }
 }
@@ -282,19 +282,19 @@ function Invoke-InstallSelfTest {
     Assert-Equal 'cap 9.0' (Convert-ComputeCapability '9.0') '90'
     Assert-Equal 'cap 8.6' (Convert-ComputeCapability ' 8.6 ') '86'
     Assert-Equal 'cap 8.90' (Convert-ComputeCapability '8.90') $null
-    Assert-Equal 'cap vide' (Convert-ComputeCapability '') $null
+    Assert-Equal 'cap empty' (Convert-ComputeCapability '') $null
     Assert-Equal 'cap sm' (Convert-ComputeCapability 'sm_89') $null
 
     $none = Select-InstallPlan $false $false '' $false @() @()
-    Assert-Plan 'rien' $none $true 'cpu' 'cpu-release' '' '*Aucune carte NVIDIA*'
+    Assert-Plan 'nothing' $none $true 'cpu' 'cpu-release' '' '*No NVIDIA GPU*'
 
     $gpuOnly = Select-InstallPlan $false $false '' $false @('89') @('RTX 4060 Ti (sm_89)')
-    Assert-Plan 'gpu sans toolkit' $gpuOnly $true 'cpu' 'cpu-release' '' '*CUDA Toolkit*'
+    Assert-Plan 'gpu without toolkit' $gpuOnly $true 'cpu' 'cpu-release' '' '*CUDA Toolkit*'
 
     $cuda = Select-InstallPlan $false $false '' $true @('89') @('RTX 4060 Ti (sm_89)')
     Assert-Plan 'cuda 89' $cuda $true 'cuda' 'cuda-release-local' '89' '*sm_89*'
     Assert-Equal 'cuda write' ([string]$cuda.WriteUserPreset) ([string]$true)
-    Assert-Equal 'cuda exe' $cuda.ExeRelative 'build\cuda-release-local\BancLocal.exe'
+    Assert-Equal 'cuda exe' $cuda.ExeRelative 'build\cuda-release-local\WaffleIron.exe'
 
     $multi = Select-InstallPlan $false $false '' $true @('89', '86') @('A', 'B')
     Assert-Plan 'multi' $multi $true 'cuda' 'cuda-release-local' '86;89' '*sm_86, sm_89*'
@@ -303,92 +303,92 @@ function Invoke-InstallSelfTest {
     Assert-Plan 'force cpu' $forceCpu $true 'cpu' 'cpu-release' '' '*-Cpu*'
 
     $forceCudaMissing = Select-InstallPlan $false $true '' $false @() @()
-    Assert-Equal 'force cuda sans toolkit' ([string]$forceCudaMissing.Ok) ([string]$false)
+    Assert-Equal 'force cuda without toolkit' ([string]$forceCudaMissing.Ok) ([string]$false)
     Assert-True 'force cuda message' ($forceCudaMissing.Error -like '*nvcc*')
 
     $forceCudaBlind = Select-InstallPlan $false $true '' $true @() @()
-    Assert-Plan 'force cuda aveugle' $forceCudaBlind $true 'cuda' 'cuda-release' '' '*sm_89*'
+    Assert-Plan 'force cuda blind' $forceCudaBlind $true 'cuda' 'cuda-release' '' '*sm_89*'
     Assert-Equal 'force cuda write' ([string]$forceCudaBlind.WriteUserPreset) ([string]$false)
 
     $requested = Select-InstallPlan $false $false '8.9' $true @() @()
     Assert-Plan 'arch 8.9' $requested $true 'cuda' 'cuda-release-local' '89' '*sm_89*'
 
-    $requestedMany = Select-InstallPlan $false $false '120,89' $true @('86') @('ancienne')
-    Assert-Plan 'arch liste' $requestedMany $true 'cuda' 'cuda-release-local' '89;120' '*remplace*'
+    $requestedMany = Select-InstallPlan $false $false '120,89' $true @('86') @('older')
+    Assert-Plan 'arch list' $requestedMany $true 'cuda' 'cuda-release-local' '89;120' '*overrides*'
 
     $dup = Select-InstallPlan $false $false '89,89' $true @() @()
-    Assert-Plan 'arch doublon' $dup $true 'cuda' 'cuda-release-local' '89' '*sm_89*'
+    Assert-Plan 'duplicate arch' $dup $true 'cuda' 'cuda-release-local' '89' '*sm_89*'
 
     $bad = Select-InstallPlan $false $false 'sm_89' $true @() @()
-    Assert-Equal 'arch invalide' ([string]$bad.Ok) ([string]$false)
+    Assert-Equal 'invalid arch' ([string]$bad.Ok) ([string]$false)
 
     $both = Select-InstallPlan $true $true '' $true @() @()
-    Assert-Equal 'cpu et cuda' ([string]$both.Ok) ([string]$false)
+    Assert-Equal 'cpu and cuda' ([string]$both.Ok) ([string]$false)
 
     $archCpu = Select-InstallPlan $true $false '86' $true @() @()
-    Assert-Equal 'arch et cpu' ([string]$archCpu.Ok) ([string]$false)
+    Assert-Equal 'arch and cpu' ([string]$archCpu.Ok) ([string]$false)
 
     $toolkitOnly = Select-InstallPlan $false $false '' $true @() @()
-    Assert-Plan 'toolkit seul' $toolkitOnly $true 'cpu' 'cpu-release' '' '*sm_89*'
+    Assert-Plan 'toolkit only' $toolkitOnly $true 'cpu' 'cpu-release' '' '*sm_89*'
 
     $json = New-CudaUserPresetJson -ArchitectureText '86;89' -Summary 'RTX "4060"'
     $parsed = $json | ConvertFrom-Json
-    Assert-Equal 'json nom' $parsed.configurePresets[0].name 'cuda-release-local'
+    Assert-Equal 'json name' $parsed.configurePresets[0].name 'cuda-release-local'
     Assert-Equal 'json arch' $parsed.configurePresets[0].cacheVariables.CMAKE_CUDA_ARCHITECTURES '86;89'
-    Assert-Equal 'json bin absent' $parsed.configurePresets[0].PSObject.Properties['binaryDir'] $null
-    Assert-Equal 'json herite' $parsed.configurePresets[0].inherits 'cuda-release'
-    Assert-True 'json guillemet' ($parsed.configurePresets[0].displayName -like '*RTX "4060"*')
-    $vendor = $parsed.vendor.PSObject.Properties['banc.local/install/1.0'].Value
+    Assert-Equal 'json bin missing' $parsed.configurePresets[0].PSObject.Properties['binaryDir'] $null
+    Assert-Equal 'json inherits' $parsed.configurePresets[0].inherits 'cuda-release'
+    Assert-True 'json quote' ($parsed.configurePresets[0].displayName -like '*RTX "4060"*')
+    $vendor = $parsed.vendor.PSObject.Properties['waffle.iron/install/1.0'].Value
     Assert-True 'json vendor' ($vendor.generated -eq $true)
-    Assert-True 'json marqueur' ($json.Contains('banc.local/install/1.0'))
+    Assert-True 'json marker' ($json.Contains('waffle.iron/install/1.0'))
 
     Assert-Equal 'cmake 3.25' (Parse-CMakeVersion "cmake version 3.25.1`n") ([version]'3.25.1')
-    Assert-True 'cmake ancien' ((Parse-CMakeVersion 'cmake version 3.24.0') -lt [version]'3.25.0')
+    Assert-True 'cmake old' ((Parse-CMakeVersion 'cmake version 3.24.0') -lt [version]'3.25.0')
     Assert-Equal 'nvcc' (Parse-NvccVersion "Cuda compilation tools, release 12.6, V12.6.77") ([version]'12.6')
     Assert-True 'warn 120' ((Get-CudaToolkitWarning ([version]'12.6') '120') -like '*12.8*')
     Assert-Equal 'warn 89 recent' (Get-CudaToolkitWarning ([version]'12.6') '89') $null
-    Assert-True 'warn 89 vieux' ((Get-CudaToolkitWarning ([version]'11.7') '89') -like '*11.8*')
+    Assert-True 'warn 89 old' ((Get-CudaToolkitWarning ([version]'11.7') '89') -like '*11.8*')
     Assert-True 'warn 86' ((Get-CudaToolkitWarning ([version]'11.0') '86') -like '*11.1*')
     Assert-Equal 'warn 75' (Get-CudaToolkitWarning ([version]'11.0') '75') $null
 
     if ($script:TestFailures -gt 0) {
-        throw ("Autotest : " + $script:TestFailures + " échec(s).")
+        throw ("Self-test: " + $script:TestFailures + " failure(s).")
     }
-    Write-Host "Autotest réussi."
+    Write-Host "Self-test passed."
 }
 
 function Show-InstallHelp {
     Write-Host @"
-Banc Local - installation et lancement
+Waffle Iron - install and launch
 
   install.cmd
-      Vérifie les prérequis, récupère llama.cpp si besoin, choisit CPU ou CUDA,
-      compile, puis ouvre l'interface.
+      Checks prerequisites, fetches llama.cpp if needed, chooses CPU or CUDA,
+      builds, then opens the interface.
 
-  install.cmd -SansLancement
-      Compile sans ouvrir l'interface.
+  install.cmd -NoLaunch
+      Builds without opening the interface.
 
   install.cmd -Cpu
-      Force la compilation CPU (preset cpu-release).
+      Forces a CPU build (preset cpu-release).
 
   install.cmd -Cuda
-      Force la compilation CUDA. Sans carte identifiée, l'architecture reste sm_89.
+      Forces a CUDA build. With no GPU identified, the architecture stays sm_89.
 
   install.cmd -Architecture 86
-      Impose l'architecture CUDA (86, 89, 120...). 8.9 est accepté et devient 89.
-      Plusieurs valeurs : -Architecture 86,89
+      Sets the CUDA architecture (86, 89, 120...). 8.9 is accepted and becomes 89.
+      Several values: -Architecture 86,89
 
   install.cmd -Tests
-      Lance les tests après la compilation.
+      Runs the tests after the build.
 
-  install.cmd -Aide
-      Affiche cette aide.
+  install.cmd -Help
+      Shows this help.
 
-  lancer.cmd
-      Rouvre BancLocal.exe déjà compilé, sans recompiler.
+  launch.cmd
+      Opens an already built WaffleIron.exe, without rebuilding.
 
-La première compilation CUDA est longue. Relancer install.cmd reprend où elle s'est arrêtée.
-Journal : build\install.log
+The first CUDA build is long. Running install.cmd again resumes where it stopped.
+Log: build\install.log
 "@
 }
 
@@ -408,9 +408,9 @@ function Find-FirstFile([string[]]$Candidates) {
 }
 
 function Import-VcEnvironment([string]$VcVarsPath) {
-    $env:BANC_VCVARS = $VcVarsPath
-    $batch = Join-Path $env:TEMP ("banc-vcvars-" + $PID + ".cmd")
-    $content = "@echo off`r`ncall `"%BANC_VCVARS%`" >nul`r`nif errorlevel 1 exit /b 1`r`nchcp 65001 >nul`r`nset`r`n"
+    $env:WAFFLE_VCVARS = $VcVarsPath
+    $batch = Join-Path $env:TEMP ("waffle-vcvars-" + $PID + ".cmd")
+    $content = "@echo off`r`ncall `"%WAFFLE_VCVARS%`" >nul`r`nif errorlevel 1 exit /b 1`r`nchcp 65001 >nul`r`nset`r`n"
     [System.IO.File]::WriteAllText($batch, $content, [System.Text.Encoding]::ASCII)
     $previous = [Console]::OutputEncoding
     [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
@@ -420,14 +420,14 @@ function Import-VcEnvironment([string]$VcVarsPath) {
     } finally {
         [Console]::OutputEncoding = $previous
         Remove-Item -LiteralPath $batch -Force -ErrorAction SilentlyContinue
-        Remove-Item Env:BANC_VCVARS -ErrorAction SilentlyContinue
+        Remove-Item Env:WAFFLE_VCVARS -ErrorAction SilentlyContinue
     }
     if ($code -ne 0) {
-        throw ("Impossible d'initialiser Visual Studio (vcvars64.bat, code " + $code + ").")
+        throw ("Cannot initialize Visual Studio (vcvars64.bat, code " + $code + ").")
     }
     foreach ($line in @($lines)) {
         if ($line -match '^([A-Za-z_][A-Za-z0-9_]*)=(.*)$') {
-            if ($Matches[1] -eq 'BANC_VCVARS') { continue }
+            if ($Matches[1] -eq 'WAFFLE_VCVARS') { continue }
             Set-Item -Path ("Env:" + $Matches[1]) -Value $Matches[2]
         }
     }
@@ -500,7 +500,7 @@ function Invoke-Checked {
     Write-Host ("    " + $File + " " + ($ArgumentList -join ' '))
     & $File @ArgumentList
     if ($LASTEXITCODE -ne 0) {
-        throw ("Commande échouée (code " + $LASTEXITCODE + ") : " + $File)
+        throw ("Command failed (code " + $LASTEXITCODE + "): " + $File)
     }
 }
 
@@ -510,7 +510,7 @@ function Write-Utf8File([string]$Path, [string]$Content) {
 }
 
 function Get-LaunchExecutable([string]$Root) {
-    $marker = Join-Path $Root 'build\banc-launch.txt'
+    $marker = Join-Path $Root 'build\waffle-launch.txt'
     if (Test-Path -LiteralPath $marker) {
         $line = Get-Content -LiteralPath $marker -TotalCount 1
         if ($line) {
@@ -521,9 +521,9 @@ function Get-LaunchExecutable([string]$Root) {
     $best = $null
     $bestTime = $null
     foreach ($relative in @(
-        'build\cuda-release\BancLocal.exe',
-        'build\cpu-release\BancLocal.exe',
-        'build\cuda-release-local\BancLocal.exe'
+        'build\cuda-release\WaffleIron.exe',
+        'build\cpu-release\WaffleIron.exe',
+        'build\cuda-release-local\WaffleIron.exe'
     )) {
         $full = Join-Path $Root $relative
         if (Test-Path -LiteralPath $full) {
@@ -537,12 +537,12 @@ function Get-LaunchExecutable([string]$Root) {
     return $best
 }
 
-function Start-BancGui([string]$Exe) {
+function Start-WaffleGui([string]$Exe) {
     if (-not $Exe -or -not (Test-Path -LiteralPath $Exe)) {
-        throw "BancLocal.exe est introuvable. Lancez d'abord install.cmd à la racine du dépôt."
+        throw "WaffleIron.exe was not found. Run install.cmd from the repository root first."
     }
     Start-Process -FilePath $Exe -WorkingDirectory (Split-Path -Parent $Exe) | Out-Null
-    Write-Ok ("Interface lancée : " + $Exe)
+    Write-Ok ("Interface started: " + $Exe)
 }
 
 function Start-InstallLog([string]$Root) {
@@ -552,7 +552,7 @@ function Start-InstallLog([string]$Root) {
         Start-Transcript -Path (Join-Path $dir 'install.log') -Force | Out-Null
         $script:TranscriptOn = $true
     } catch {
-        Write-Warn ("Journal indisponible : " + $_.Exception.Message)
+        Write-Warn ("Log unavailable: " + $_.Exception.Message)
     }
 }
 
@@ -565,26 +565,26 @@ function Stop-InstallLog {
 
 function Show-Problems($Problems) {
     Write-Host ""
-    Write-Host "Installation impossible : des prérequis manquent." -ForegroundColor Red
+    Write-Host "Installation cannot continue: prerequisites are missing." -ForegroundColor Red
     Write-Host ""
     foreach ($problem in $Problems) {
         Write-Host $problem
         Write-Host ""
     }
-    Write-Host "Corrigez les points ci-dessus, puis relancez install.cmd."
-    throw "Prérequis incomplets."
+    Write-Host "Fix the items above, then run install.cmd again."
+    throw "Prerequisites are incomplete."
 }
 
-function Start-BancInstall {
+function Start-WaffleInstall {
     $root = Split-Path -Parent $PSScriptRoot
     try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false } catch {}
     $OutputEncoding = [Console]::OutputEncoding
-    if (-not $Lancer) { Start-InstallLog $root }
-    Write-Step "Banc Local"
-    Write-Host ("    Dossier : " + $root)
+    if (-not $Launch) { Start-InstallLog $root }
+    Write-Step "Waffle Iron"
+    Write-Host ("    Folder: " + $root)
 
-    if ($Lancer) {
-        Start-BancGui (Get-LaunchExecutable $root)
+    if ($Launch) {
+        Start-WaffleGui (Get-LaunchExecutable $root)
         return
     }
 
@@ -598,10 +598,10 @@ function Start-BancInstall {
     if (-not $git -and $gitCmd) { $git = $gitCmd.Source }
     if (-not $git) {
         [void]$problems.Add(@"
-Git est introuvable.
-Il sert à récupérer llama.cpp (sous-module) et à vcpkg.
-Installez Git pour Windows : https://git-scm.com/download/win
-Puis ouvrez un nouveau terminal et relancez install.cmd.
+Git was not found.
+It is used to fetch llama.cpp (the submodule) and by vcpkg.
+Install Git for Windows: https://git-scm.com/download/win
+Then open a new terminal and run install.cmd again.
 "@.Trim())
     } else {
         Add-ToolDirectory $git
@@ -610,12 +610,12 @@ Puis ouvrez un nouveau terminal et relancez install.cmd.
     $vsRoot = Get-VisualStudioRoot
     if (-not $vsRoot) {
         [void]$problems.Add(@"
-Visual Studio avec les outils C++ (MSVC x64) est introuvable.
-Installez Visual Studio 2022 ou plus récent (2026 convient) :
-  https://visualstudio.microsoft.com/fr/downloads/
-Dans l'installateur, cochez la charge de travail « Développement Desktop en C++ ».
-Elle doit inclure les outils MSVC, « Outils CMake C++ pour Windows » (CMake et Ninja)
-et « Gestionnaire de package vcpkg ». Les Build Tools seuls conviennent aussi.
+Visual Studio with the C++ tools (MSVC x64) was not found.
+Install Visual Studio 2022 or newer (2026 is fine):
+  https://visualstudio.microsoft.com/downloads/
+In the installer, select the "Desktop development with C++" workload.
+It must include the MSVC tools, "C++ CMake tools for Windows" (CMake and Ninja),
+and "vcpkg package manager". The Build Tools alone are enough too.
 "@.Trim())
     } else {
         Write-Ok ("Visual Studio : " + $vsRoot)
@@ -626,8 +626,8 @@ et « Gestionnaire de package vcpkg ». Les Build Tools seuls conviennent aussi.
         $cl = Get-Command cl -ErrorAction SilentlyContinue
         if (-not $cl) {
             [void]$problems.Add(@"
-Le compilateur MSVC (cl.exe) est introuvable après l'initialisation de Visual Studio.
-Modifiez l'installation et cochez les outils MSVC C++ (x64/x86).
+The MSVC compiler (cl.exe) was not found after initializing Visual Studio.
+Modify the installation and select the MSVC C++ tools (x64/x86).
 "@.Trim())
         }
         $cmake = $null
@@ -642,16 +642,16 @@ Modifiez l'installation et cochez les outils MSVC C++ (x64/x86).
         }
         if (-not $cmake) {
             [void]$problems.Add(@"
-CMake 3.25 ou plus récent est introuvable.
-Cochez « Outils CMake C++ pour Windows » dans Visual Studio Installer,
-ou installez CMake : https://cmake.org/download/
-Puis relancez install.cmd.
+CMake 3.25 or newer was not found.
+Select "C++ CMake tools for Windows" in the Visual Studio Installer,
+or install CMake: https://cmake.org/download/
+Then run install.cmd again.
 "@.Trim())
         } else {
             $cmakeVersion = Parse-CMakeVersion ((@(& $cmake --version)) -join "`n")
             if (-not $cmakeVersion -or $cmakeVersion -lt [version]'3.25.0') {
-                $shown = if ($cmakeVersion) { [string]$cmakeVersion } else { "inconnue" }
-                [void]$problems.Add(("CMake " + $shown + " est trop ancien. Il faut la version 3.25 ou plus (presets).`r`nhttps://cmake.org/download/"))
+                $shown = if ($cmakeVersion) { [string]$cmakeVersion } else { "unknown" }
+                [void]$problems.Add(("CMake " + $shown + " is too old. Version 3.25 or newer is required (presets).`r`nhttps://cmake.org/download/"))
             } else {
                 Write-Ok ("CMake " + $cmakeVersion)
             }
@@ -667,9 +667,9 @@ Puis relancez install.cmd.
         }
         if (-not $ninja) {
             [void]$problems.Add(@"
-Ninja est introuvable.
-Il est fourni avec « Outils CMake C++ pour Windows » dans Visual Studio,
-ou séparément : https://ninja-build.org/
+Ninja was not found.
+It ships with "C++ CMake tools for Windows" in Visual Studio,
+or separately: https://ninja-build.org/
 "@.Trim())
         } else {
             Write-Ok ("Ninja : " + $ninja)
@@ -690,14 +690,14 @@ ou séparément : https://ninja-build.org/
         if ($vcpkgRoot) { $toolchain = Join-Path $vcpkgRoot 'scripts\buildsystems\vcpkg.cmake' }
         if (-not $toolchain -or -not (Test-Path -LiteralPath $toolchain)) {
             [void]$problems.Add(@"
-vcpkg est introuvable (VCPKG_ROOT, ou VC\vcpkg à côté de Visual Studio).
-Option 1 : Visual Studio Installer, Modifier, charge « Développement Desktop en C++ »,
-           cocher « Gestionnaire de package vcpkg ».
-Option 2 : installation autonome
-           git clone https://github.com/microsoft/vcpkg C:\vcpkg
-           C:\vcpkg\bootstrap-vcpkg.bat
-           set VCPKG_ROOT=C:\vcpkg
-Puis relancez install.cmd.
+vcpkg was not found (VCPKG_ROOT, or VC\vcpkg next to Visual Studio).
+Option 1: Visual Studio Installer, Modify, "Desktop development with C++" workload,
+          select "vcpkg package manager".
+Option 2: standalone install
+          git clone https://github.com/microsoft/vcpkg C:\vcpkg
+          C:\vcpkg\bootstrap-vcpkg.bat
+          set VCPKG_ROOT=C:\vcpkg
+Then run install.cmd again.
 "@.Trim())
         } else {
             $env:VCPKG_ROOT = $vcpkgRoot
@@ -710,16 +710,16 @@ Puis relancez install.cmd.
     $llama = Join-Path $root 'external\llama.cpp\CMakeLists.txt'
     if (-not (Test-Path -LiteralPath $llama)) {
         if (-not (Test-Path -LiteralPath (Join-Path $root '.git'))) {
-            throw "Ce dossier n'est pas un clone Git. Utilisez git clone --recurse-submodules, pas une archive zip : le sous-module external/llama.cpp manquerait."
+            throw "This folder is not a Git clone. Use git clone --recurse-submodules, not a zip archive: the external/llama.cpp submodule would be missing."
         }
-        Write-Step "Récupération du sous-module llama.cpp (accès Internet)"
+        Write-Step "Fetching the llama.cpp submodule (internet access)"
         $env:GIT_TERMINAL_PROMPT = '0'
         Invoke-Checked $git @('-C', $root, 'submodule', 'update', '--init', '--recursive')
         if (-not (Test-Path -LiteralPath $llama)) {
-            throw "Le sous-module external/llama.cpp est toujours absent après git submodule update."
+            throw "The external/llama.cpp submodule is still missing after git submodule update."
         }
     } else {
-        Write-Ok "Sous-module llama.cpp présent."
+        Write-Ok "llama.cpp submodule is present."
     }
 
     $cudaRoot = Find-CudaToolkitRoot
@@ -736,11 +736,11 @@ Puis relancez install.cmd.
         [void]$labels.Add([string]$gpu.Name + " (sm_" + $gpu.Arch + ", " + $gpu.Memory + ")")
         Write-Ok ("GPU : " + $gpu.Name + "  compute " + $gpu.Compute + "  " + $gpu.Memory)
     }
-    if ($gpus.Count -eq 0) { Write-Warn "Aucune carte NVIDIA détectée (nvidia-smi)." }
+    if ($gpus.Count -eq 0) { Write-Warn "No NVIDIA GPU detected (nvidia-smi)." }
 
     $plan = Select-InstallPlan -ForceCpu:([bool]$Cpu) -ForceCuda:([bool]$Cuda) -RequestedArchitecture $Architecture -HasCudaToolkit:([bool]$cudaRoot) -DetectedArchitectures @($detected.ToArray()) -GpuLabels @($labels.ToArray())
     if (-not $plan.Ok) { throw $plan.Error }
-    Write-Step "Configuration retenue"
+    Write-Step "Selected configuration"
     Write-Host ("    " + $plan.Note)
     if ($plan.Kind -eq 'cuda') {
         $nvccOut = ((@(& nvcc --version)) -join "`n")
@@ -749,7 +749,7 @@ Puis relancez install.cmd.
         if (-not $archForWarning) { $archForWarning = '89' }
         $warning = Get-CudaToolkitWarning $nvccVersion $archForWarning
         if ($warning) { Write-Warn $warning }
-        if (-not $cudaRoot) { Write-Warn "Le build CUDA est demandé alors que nvcc n'a pas été trouvé avant la configuration." }
+        if (-not $cudaRoot) { Write-Warn "A CUDA build was requested, but nvcc was not found before configuration." }
     }
 
     $configurePreset = $plan.Preset
@@ -759,37 +759,37 @@ Puis relancez install.cmd.
         $foreign = $false
         if (Test-Path -LiteralPath $userPresetPath) {
             $existing = Get-Content -LiteralPath $userPresetPath -Raw
-            if ($existing -notlike '*banc.local/install/1.0*') { $foreign = $true }
+            if ($existing -notlike '*waffle.iron/install/1.0*') { $foreign = $true }
         }
         if ($foreign) {
-            Write-Warn "CMakeUserPresets.json existe et n'a pas été créé par install.cmd : il est laissé intact."
-            $archFile = Join-Path $root 'build\banc-cuda-arch.cmake'
-            Write-Utf8File $archFile ("set(CMAKE_CUDA_ARCHITECTURES `"" + $plan.ArchitectureText + "`" CACHE STRING `"Choisi par install.cmd`" FORCE)`r`n")
+            Write-Warn "CMakeUserPresets.json exists and was not created by install.cmd: it is left unchanged."
+            $archFile = Join-Path $root 'build\waffle-cuda-arch.cmake'
+            Write-Utf8File $archFile ("set(CMAKE_CUDA_ARCHITECTURES `"" + $plan.ArchitectureText + "`" CACHE STRING `"Chosen by install.cmd`" FORCE)`r`n")
             $include = (Resolve-Path -LiteralPath $archFile).Path.Replace('\', '/')
             if ($include.Contains(';')) {
-                throw ("Le chemin du dépôt contient un point-virgule, inutilisable dans une liste CMake : " + $include)
+                throw ("The repository path contains a semicolon, which cannot be used in a CMake list: " + $include)
             }
             $configurePreset = 'cuda-release'
-            $plan.ExeRelative = 'build\cuda-release\BancLocal.exe'
+            $plan.ExeRelative = 'build\cuda-release\WaffleIron.exe'
             $cmakeArgs = @('--preset', 'cuda-release', ('-DCMAKE_PROJECT_TOP_LEVEL_INCLUDES=' + $include))
         } else {
             $summary = ([regex]::Replace($plan.Note, '\s+', ' ')).Trim()
             if ($summary.Length -gt 140) { $summary = $summary.Substring(0, 140) }
             Write-Utf8File $userPresetPath (New-CudaUserPresetJson -ArchitectureText $plan.ArchitectureText -Summary $summary)
-            Write-Ok ("Preset local : CMakeUserPresets.json (sm_" + (($plan.ArchitectureText -split ';') -join ', sm_') + ").")
+            Write-Ok ("Local preset: CMakeUserPresets.json (sm_" + (($plan.ArchitectureText -split ';') -join ', sm_') + ").")
         }
     }
 
     Write-Host ("    Preset : " + $configurePreset)
-    Write-Host ("    Exécutable : " + $plan.ExeRelative)
+    Write-Host ("    Executable: " + $plan.ExeRelative)
     Push-Location $root
     try {
-        Write-Step "Configuration CMake (le premier passage télécharge les dépendances vcpkg, Internet requis)"
+        Write-Step "CMake configure (the first run downloads vcpkg dependencies; internet required)"
         Invoke-Checked $cmake $cmakeArgs
         if ($plan.Kind -eq 'cuda') {
-            Write-Step "Compilation CUDA. Elle peut être longue. En cas d'arrêt, relancez install.cmd : elle reprend."
+            Write-Step "CUDA build. It can take a long time. If it stops, run install.cmd again: it resumes."
         } else {
-            Write-Step "Compilation"
+            Write-Step "Build"
         }
         Invoke-Checked $cmake @('--build', '--preset', $configurePreset)
     } finally {
@@ -798,9 +798,9 @@ Puis relancez install.cmd.
 
     $exe = Join-Path $root $plan.ExeRelative
     if (-not (Test-Path -LiteralPath $exe)) {
-        throw ("La compilation s'est terminée sans produire " + $exe)
+        throw ("The build finished without producing " + $exe)
     }
-    Write-Utf8File (Join-Path $root 'build\banc-launch.txt') ($plan.ExeRelative + "`r`n")
+    Write-Utf8File (Join-Path $root 'build\waffle-launch.txt') ($plan.ExeRelative + "`r`n")
 
     if ($Tests) {
         Write-Step "Tests"
@@ -811,15 +811,15 @@ Puis relancez install.cmd.
         Invoke-Checked $ctest @('--test-dir', (Split-Path -Parent $exe), '--output-on-failure')
     }
 
-    if ($SansLancement) {
-        Write-Ok "Compilation terminée. Ouvrez l'interface avec lancer.cmd."
+    if ($NoLaunch) {
+        Write-Ok "Build finished. Open the interface with launch.cmd."
     } else {
-        Write-Step "Ouverture de l'interface"
-        Start-BancGui $exe
-        Write-Host "    Au premier affichage, la bibliothèque parcourt vos dossiers de modèles."
-        Write-Host "    Pour rouvrir plus tard : lancer.cmd"
+        Write-Step "Opening the interface"
+        Start-WaffleGui $exe
+        Write-Host "    On first display, the library scans your model folders."
+        Write-Host "    To open it again later: launch.cmd"
     }
-    Write-Ok "Journal : build\install.log"
+    Write-Ok "Log: build\install.log"
 }
 
 try {
@@ -827,17 +827,17 @@ try {
         Invoke-InstallSelfTest
         exit 0
     }
-    if ($Aide) {
+    if ($Help) {
         Show-InstallHelp
         exit 0
     }
     if ($env:OS -ne 'Windows_NT') {
-        throw "Banc Local se construit uniquement sous Windows."
+        throw "Waffle Iron builds on Windows only."
     }
-    Start-BancInstall
+    Start-WaffleInstall
 } catch {
     Write-Host ""
-    Write-Host ("ERREUR : " + $_.Exception.Message) -ForegroundColor Red
+    Write-Host ("ERROR: " + $_.Exception.Message) -ForegroundColor Red
     exit 1
 } finally {
     Stop-InstallLog

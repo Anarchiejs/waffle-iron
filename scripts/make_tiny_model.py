@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Génère tests/data/tiny-llama.gguf : llama minuscule, poids aléatoires, chargeable par llama.cpp b11907.
+"""Generate tests/data/tiny-llama.gguf: a tiny llama, random weights, loadable by llama.cpp b11907.
 
-Architecture : n_embd 64, 2 couches, 4 têtes (2 KV), n_ff 128, contexte 256.
-Vocabulaire SPM (« llama ») : <unk>, <s>, </s>, 256 octets, puis des morceaux fr/en.
-Les tenseurs 1D restent en f32, les matrices en f16 (general.file_type = MOSTLY_F16).
-Les formes NumPy sont l'inverse des dimensions ggml : ne[0] est le dernier axe NumPy.
+Architecture: n_embd 64, 2 layers, 4 heads (2 KV), n_ff 128, context 256.
+SPM vocabulary ("llama"): <unk>, <s>, </s>, 256 bytes, then French and English pieces.
+1D tensors stay f32, matrices are f16 (general.file_type = MOSTLY_F16).
+NumPy shapes are the reverse of the ggml dimensions: ne[0] is the last NumPy axis.
 """
 
 from __future__ import annotations
@@ -35,7 +35,9 @@ HEAD_DIM = N_EMBD // N_HEAD
 SEED = 11907
 LIMIT = 10 * 1024 * 1024
 
-# Mots courts fr/en. Le préfixe ▁ (U+2581) marque le début de mot, comme SentencePiece.
+# Short French and English pieces. The ▁ prefix (U+2581) marks a word start, as in SentencePiece.
+# The French pieces are vocabulary data for the committed fixture. Keep them so a
+# regeneration still matches tests/data/tiny-llama.gguf.
 WORDS = """
 le la les un une des et ou mais donc car je tu il elle on nous vous ils elles
 ce cet cette ces mon ma mes ton ta tes son sa ses notre votre leur
@@ -70,7 +72,7 @@ def vocab() -> tuple[list[str], list[float], list[int]]:
             continue
         seen.add(word)
         tokens.append(word)
-        # Score un peu plus haut pour la forme ▁mot, afin qu'elle gagne au découpage.
+        # Slightly higher score for the ▁word form, so it wins at segmentation.
         scores.append(-0.2 if word.startswith("▁") else -1.0 - 0.01 * len(tokens))
         types.append(int(gguf.TokenType.NORMAL))
     return tokens, scores, types
@@ -97,7 +99,9 @@ def main() -> None:
 
     writer = gguf.GGUFWriter(out, "llama")
     writer.add_name("tiny-llama")
-    writer.add_description("Modèle llama minuscule à poids aléatoires, réservé aux tests de Banc Local.")
+    writer.add_description(
+        "Random-weight tiny llama, reserved for Waffle Iron tests. Not a real model ever."
+    )
     writer.add_file_type(int(gguf.LlamaFileType.MOSTLY_F16))
     writer.add_vocab_size(n_vocab)
     writer.add_context_length(N_CTX)
@@ -141,8 +145,8 @@ def main() -> None:
 
     size = out.stat().st_size
     if size >= LIMIT:
-        raise SystemExit(f"{out} fait {size} octets, au-dessus de 10 Mio")
-    print(f"{out}  {n_vocab} jetons  {size} octets")
+        raise SystemExit(f"{out} is {size} bytes, above 10 MiB")
+    print(f"{out}  {n_vocab} tokens  {size} bytes")
 
 
 if __name__ == "__main__":

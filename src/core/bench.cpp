@@ -17,7 +17,7 @@
 #include <random>
 #include <sstream>
 
-namespace banc {
+namespace waffle {
 namespace {
 using Clock = std::chrono::steady_clock;
 double seconds(Clock::time_point start) {
@@ -74,9 +74,9 @@ Stats compute_stats(std::span<const double> values) {
     Stats out;
     if (values.empty()) return out;
     for (double x : values)
-        if (!std::isfinite(x)) throw Error("Les statistiques exigent des valeurs finies");
+        if (!std::isfinite(x)) throw Error("Statistics require finite values");
     out.n = static_cast<int>(values.size());
-    // Welford évite la soustraction de deux grands carrés presque égaux.
+    // Welford avoids subtracting two large, nearly equal squares.
     double m2 = 0;
     size_t count = 0;
     for (double x : values) {
@@ -104,7 +104,7 @@ Stats compute_stats(std::span<const double> values) {
 BenchSample run_bench_once(EngineSession& session, const BenchConfig& cfg) {
     const auto& info = session.info();
     if (!cfg.n_prompt || !cfg.n_gen || uint64_t(cfg.n_prompt) + cfg.n_gen > info.n_ctx)
-        throw Error("Le banc exige une consigne et une génération non vides tenant dans le contexte");
+        throw Error("The bench needs a non-empty prompt and generation that fit in the context");
     session.throw_if_stopped();
     std::vector<llama_token> ordinary;
     for (int i = 0; i < session.n_vocab(); ++i) {
@@ -114,7 +114,7 @@ BenchSample run_bench_once(EngineSession& session, const BenchConfig& cfg) {
             !session.is_eog(i))
             ordinary.push_back(i);
     }
-    if (ordinary.empty()) throw Error("Le vocabulaire ne contient aucun token ordinaire");
+    if (ordinary.empty()) throw Error("Vocabulary has no ordinary token");
     std::mt19937 rng(42);
     std::uniform_int_distribution<size_t> pick(0, ordinary.size() - 1);
     std::vector<llama_token> prompt(cfg.n_prompt);
@@ -142,18 +142,18 @@ BenchSample run_bench_once(EngineSession& session, const BenchConfig& cfg) {
 }
 
 BenchResult run_bench(Engine& engine, Telemetry* telemetry, const BenchConfig& cfg, const ProgressFn& progress) {
-    if (cfg.repetitions < 1 || cfg.warmup < 0) throw Error("Nombre de répétitions ou de préchauffages invalide");
+    if (cfg.repetitions < 1 || cfg.warmup < 0) throw Error("Invalid repetition or warmup count");
     BenchResult result;
     result.config = cfg;
     result.timestamp = utc_now();
-    result.llama_version = BANC_LLAMA_VERSION;
-    report(engine, progress, 0, "Chargement du modèle");
+    result.llama_version = WAFFLE_LLAMA_VERSION;
+    report(engine, progress, 0, "Loading model");
     engine
         .submit([&](EngineSession& s) {
-            engine.set_status("Chargement du modèle");
+            engine.set_status("Loading model");
             const auto& info = s.load(cfg.load);
             result.load_ms = info.load_ms;
-            // Nom et quantification lus dans l'en-tête GGUF ; la description de llama.cpp sert de secours.
+            // Name and quantization read from the GGUF header; the llama.cpp description is the fallback.
             result.model_name = info.description;
             result.model_file_type = info.description;
             try {
@@ -168,7 +168,7 @@ BenchResult run_bench(Engine& engine, Telemetry* telemetry, const BenchConfig& c
     const int64_t total = int64_t(cfg.warmup) + cfg.repetitions;
     for (int64_t i = 0; i < total; ++i) {
         const bool warmup = i < cfg.warmup;
-        const auto label = warmup ? "Préchauffage" : "Mesure " + std::to_string(i - cfg.warmup + 1);
+        const auto label = warmup ? "Warmup" : "Run " + std::to_string(i - cfg.warmup + 1);
         report(engine, progress, static_cast<float>(i) / static_cast<float>(total), label);
         auto sample = engine
                           .submit([&](EngineSession& s) {
@@ -185,7 +185,7 @@ BenchResult run_bench(Engine& engine, Telemetry* telemetry, const BenchConfig& c
             result.samples.push_back(sample);
         }
     }
-    report(engine, progress, 1, "Mesures terminées");
+    report(engine, progress, 1, "Runs finished");
     std::vector<double> pp, tg, ttft;
     for (const auto& s : result.samples) {
         pp.push_back(s.pp_tps);
@@ -231,7 +231,7 @@ std::vector<BenchResult> run_campaign(Engine& engine, Telemetry* telemetry, cons
         } catch (const Cancelled&) {
             throw;
         } catch (const std::exception& e) {
-            if (errors) errors->push_back(config_label(configs[i]) + " : " + e.what());
+            if (errors) errors->push_back(config_label(configs[i]) + ": " + e.what());
         }
     }
     return results;
@@ -251,7 +251,7 @@ std::string to_csv(const std::vector<BenchResult>& results) {
     std::ostringstream out;
     out.imbue(std::locale::classic());
     out << std::setprecision(12);
-    // Schéma stable : identité, réglages, effectif, moyennes/écarts-types (tokens/s, ms), VRAM (octets), provenance.
+    // Stable schema: identity, settings, sample count, means/standard deviations (tokens/s, ms), VRAM (bytes), provenance.
     out << "model,model_file_type,n_gpu_layers,n_ctx,type_k,type_v,flash_attn,n_ubatch,n_batch,n_threads,n_prompt,n_"
            "gen,repetitions,warmup,samples,pp_mean,pp_stddev,tg_mean,tg_stddev,ttft_mean_ms,ttft_stddev_ms,load_ms,"
            "vram_peak_bytes,gpu,llama_version,timestamp\n";
@@ -272,7 +272,7 @@ std::string to_markdown(const std::vector<BenchResult>& results) {
     std::ostringstream out;
     out.imbue(std::locale::classic());
     out << std::fixed << std::setprecision(2);
-    out << "| Modèle | Configuration | n | pp (tokens/s) | tg (tokens/s) | TTFT (ms) | Chargement (ms) | VRAM max (Gio) "
+    out << "| Model | Configuration | n | pp (tokens/s) | tg (tokens/s) | TTFT (ms) | Load (ms) | VRAM peak (GiB) "
            "|\n"
            "|---|---|---:|---:|---:|---:|---:|---:|\n";
     for (const auto& r : results)
@@ -282,4 +282,4 @@ std::string to_markdown(const std::vector<BenchResult>& results) {
             << static_cast<double>(r.vram_peak) / GiB << " |\n";
     return out.str();
 }
-} // namespace banc
+} // namespace waffle

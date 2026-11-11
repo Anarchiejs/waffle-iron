@@ -1,180 +1,182 @@
-# Banc Local
+# Waffle Iron
 
-Banc Local est un atelier de bureau pour **comprendre, mesurer et régler les modèles GGUF** qui tournent déjà sur votre machine. Il s'adresse à qui veut savoir ce qu'un modèle coûte en mémoire, à quelle vitesse il répond, et comment le cache, le contexte ou la quantification changent le résultat — sans quitter Windows et sans envoyer les fichiers ailleurs.
+Waffle Iron is a desktop workbench for **understanding, measuring, and tuning the GGUF models** that already run on your machine. It is for anyone who wants to know what a model costs in memory, how fast it answers, and how the cache, the context, or the quantization changes the result — without leaving Windows and without sending the files anywhere else.
 
-L'outil est natif (C++20). Il s'appuie sur [llama.cpp](https://github.com/ggml-org/llama.cpp) (`libllama` et `ggml`, backend CUDA si la carte et le toolkit sont là) et affiche ses vues avec Dear ImGui et DirectX 11.
+The name is a pun: GGUF is pronounced like *gaufre*, the French word for waffle.
 
-Deux programmes :
+The tool is native (C++20). It is built on [llama.cpp](https://github.com/ggml-org/llama.cpp) (`libllama` and `ggml`, with the CUDA backend when the GPU and the toolkit are present) and draws its views with Dear ImGui and DirectX 11.
 
-| Programme | Rôle |
+Two programs:
+
+| Program | Role |
 |---|---|
-| `BancLocal.exe` | L'interface : fenêtres ancrables, bibliothèque, mémoire, mesures, génération |
-| `banc.exe` | La même base en ligne de commande, pour scripter un scan, un plan ou une campagne |
+| `WaffleIron.exe` | The interface: library, memory, measurements, and generation |
+| `waffle.exe` | The same core on the command line, for scripting a scan, a plan, or a campaign |
 
-Windows est la seule plateforme visée.
+Windows is the only target platform.
 
-## Prérequis
+## Requirements
 
-| Outil | Obligatoire | Où l'installer |
+| Tool | Required | Where to install it |
 |---|---|---|
-| Git pour Windows | oui | https://git-scm.com/download/win |
-| Visual Studio 2022 ou plus récent (2026 convient), charge de travail **Développement Desktop en C++** | oui | https://visualstudio.microsoft.com/fr/downloads/ |
-| Outils MSVC C++ (x64) | oui, inclus dans la charge | composant de l'installateur Visual Studio |
-| Outils CMake C++ pour Windows (CMake ≥ 3.25 et Ninja) | oui | même installateur, coché avec la charge C++ |
-| Gestionnaire de package vcpkg | oui | même installateur : « Gestionnaire de package vcpkg » |
-| Pilote NVIDIA récent | seulement pour le moniteur GPU et un build CUDA | via GeForce Experience ou le site NVIDIA |
-| CUDA Toolkit | non | https://developer.nvidia.com/cuda-downloads |
+| Git for Windows | yes | https://git-scm.com/download/win |
+| Visual Studio 2022 or newer (2026 is fine), **Desktop development with C++** workload | yes | https://visualstudio.microsoft.com/downloads/ |
+| MSVC C++ tools (x64) | yes, included in the workload | Visual Studio Installer component |
+| C++ CMake tools for Windows (CMake ≥ 3.25 and Ninja) | yes | same installer, selected with the C++ workload |
+| vcpkg package manager | yes | same installer: "vcpkg package manager" |
+| A recent NVIDIA driver | only for the GPU monitor and a CUDA build | GeForce Experience or the NVIDIA site |
+| CUDA Toolkit | no | https://developer.nvidia.com/cuda-downloads |
 
-Les Build Tools Visual Studio suffisent à la place de l'IDE, avec les mêmes composants. CMake et Ninja installés à part (`https://cmake.org/download/`, `https://ninja-build.org/`) sont reconnus s'ils sont sur le `PATH` ou à leur emplacement habituel.
+The Visual Studio Build Tools are enough instead of the IDE, with the same components. CMake and Ninja installed separately (`https://cmake.org/download/`, `https://ninja-build.org/`) are picked up when they are on `PATH` or in their usual location.
 
-Sans CUDA Toolkit, l'interface se compile quand même : les modèles tournent sur le processeur. Le moniteur peut tout de même lire la carte, parce que NVML vient du pilote, pas du toolkit.
+Without the CUDA Toolkit the interface still builds: models run on the CPU. The monitor can still read the GPU, because NVML comes from the driver, not from the toolkit.
 
-## Installation rapide
+## Quick install
 
 ```bat
-git clone --recurse-submodules <url> banc-local
-cd banc-local
+git clone --recurse-submodules <url> waffle-iron
+cd waffle-iron
 install.cmd
 ```
 
-`install.cmd` est la seule commande à lancer après le clone. Elle :
+`install.cmd` is the only command to run after the clone. It:
 
-1. vérifie Git, Visual Studio, MSVC, CMake ≥ 3.25, Ninja et vcpkg, et dit quoi cocher ou télécharger s'il manque quelque chose ;
-2. récupère le sous-module `external/llama.cpp` si `--recurse-submodules` a été oublié (un zip GitHub ne suffit pas : il n'a pas le sous-module) ;
-3. interroge `nvidia-smi` et cherche `nvcc` ;
-4. choisit un build CUDA pour l'architecture de la carte (`cuda-release-local`), ou `cpu-release` s'il n'y a pas de GPU NVIDIA utilisable avec un toolkit ;
-5. configure, compile, puis ouvre `BancLocal.exe`.
+1. checks Git, Visual Studio, MSVC, CMake ≥ 3.25, Ninja, and vcpkg, and says what to select or download if something is missing;
+2. fetches the `external/llama.cpp` submodule if `--recurse-submodules` was forgotten (a GitHub zip is not enough: it does not contain the submodule);
+3. queries `nvidia-smi` and looks for `nvcc`;
+4. chooses a CUDA build for the GPU architecture (`cuda-release-local`), or `cpu-release` when there is no usable NVIDIA GPU with a toolkit;
+5. configures, builds, then opens `WaffleIron.exe`.
 
-Le premier passage télécharge les dépendances vcpkg (SQLite, spdlog, Dear ImGui, ImPlot, Catch2) : il faut Internet. Une compilation CUDA de llama.cpp est longue et reprend là où elle s'est arrêtée si vous relancez `install.cmd`. Le journal est `build\install.log`.
+The first run downloads the vcpkg dependencies (SQLite, spdlog, Dear ImGui, ImPlot, Catch2): it needs the internet. A CUDA build of llama.cpp is long and resumes where it stopped if you run `install.cmd` again. The log is `build\install.log`.
 
-Pour rouvrir l'interface plus tard, sans recompiler :
+To open the interface later, without rebuilding:
 
 ```bat
-lancer.cmd
+launch.cmd
 ```
 
-Variantes :
+Variants:
 
 ```bat
-install.cmd -SansLancement
+install.cmd -NoLaunch
 install.cmd -Cpu
 install.cmd -Cuda
 install.cmd -Architecture 86
 install.cmd -Architecture 8.9
 install.cmd -Tests
-install.cmd -Aide
+install.cmd -Help
 ```
 
-`-Architecture` accepte `89` ou `8.9`, et une liste (`86,89`) si plusieurs cartes doivent être visées. `-Cpu` et `-Cuda` ensemble sont refusés.
+`-Architecture` accepts `89` or `8.9`, and a list (`86,89`) when several GPUs must be targeted. `-Cpu` and `-Cuda` together are rejected.
 
-## Premier lancement
+## First launch
 
-La base `%LOCALAPPDATA%\BancLocal\banc.db` est créée au premier démarrage. Si elle est vide, la bibliothèque est vide pendant quelques instants : un scan tourne en arrière-plan, sans bloquer la fenêtre, puis les modèles trouvés apparaissent. Un bandeau indique « Scan terminé ».
+The database `%LOCALAPPDATA%\WaffleIron\waffle.db` is created on first start. If it is empty, the library stays empty for a few moments: a scan runs in the background, without blocking the window, then the models it found appear. A toast says "Scan finished".
 
-Ce scan se relance à chaque ouverture, même si le panneau Bibliothèque a été replié. Inutile de lancer `banc scan` à la main pour le premier remplissage. Le menu **Fichier → Rescanner les modèles**, ou le bouton **Rescanner**, recommence quand vous avez ajouté des fichiers.
+That scan runs again on every launch, even when the Library page is not the one on screen. There is no need to run `waffle scan` by hand for the first fill. **Rescan**, or Ctrl+R, starts it again after you add files.
 
-La disposition de départ place la Bibliothèque à gauche, le Moniteur en bas, et les quatre autres modules en onglets au centre. Le menu **Affichage** rouvre un panneau ou réinitialise la disposition. La barre d'état montre le travail en cours, le nom de la carte et la VRAM si NVML répond.
+The sidebar lists the six pages. Ctrl+1 through Ctrl+6 switch pages. The status bar shows the work in progress, the GPU name, and VRAM when NVML answers.
 
-Un seul thread parle à llama.cpp. L'interface lui envoie le travail et continue de s'afficher pendant un chargement.
+A single thread talks to llama.cpp. The interface sends it work and keeps drawing during a load.
 
-## Où mettre les modèles
+## Where to put models
 
-Banc Local ne télécharge rien. Il indexe les fichiers GGUF déjà sur le disque. Les dossiers examinés, s'ils existent :
+Waffle Iron does not download anything. It indexes the GGUF files already on disk. The folders it looks at, when they exist:
 
-| Emplacement | Contenu habituel |
+| Location | Usual contents |
 |---|---|
-| `%USERPROFILE%\models` | vos fichiers `.gguf` déposés à la main |
-| `%USERPROFILE%\.ollama\models\blobs` | blobs Ollama (souvent sans extension ; la signature `GGUF` suffit) |
-| `%USERPROFILE%\.lmstudio\models` | modèles LM Studio |
-| `%USERPROFILE%\.cache\lm-studio\models` | ancien dossier de cache LM Studio |
-| `%OLLAMA_MODELS%\blobs`, ou `%OLLAMA_MODELS%` s'il n'y a pas de sous-dossier `blobs` | bibliothèque Ollama déplacée |
+| `%USERPROFILE%\models` | `.gguf` files you put there yourself |
+| `%USERPROFILE%\.ollama\models\blobs` | Ollama blobs (often with no extension; the `GGUF` signature is enough) |
+| `%USERPROFILE%\.lmstudio\models` | LM Studio models |
+| `%USERPROFILE%\.cache\lm-studio\models` | older LM Studio cache folder |
+| `%OLLAMA_MODELS%\blobs`, or `%OLLAMA_MODELS%` when there is no `blobs` subfolder | a moved Ollama library |
 
-Exemple : copier `gemma-4-E4B-Q4_K_M.gguf` dans `C:\Users\Vous\models`, puis ouvrir Banc Local (ou cliquer **Rescanner**). Le modèle apparaît avec son nom, son architecture, sa quantification, sa taille, son nombre de paramètres et son contexte.
+Example: copy `gemma-4-E4B-Q4_K_M.gguf` into `C:\Users\You\models`, then open Waffle Iron (or click **Rescan**). The model shows up with its name, architecture, quantization, size, parameter count, and context.
 
-La Bibliothèque ignore les fichiers qui ne sont pas des GGUF, les projecteurs de vision (`mmproj`, architecture `clip`) et les morceaux de modèles découpés autres que le premier (`…-00002-of-…`). Un autre dossier s'ajoute avec **Ajouter un dossier...** (chemin UTF-8). La fiche d'un modèle sélectionné accepte des étiquettes séparées par des virgules et des notes, enregistrées dans la base.
+The Library ignores files that are not GGUF, vision projectors (`mmproj`, architecture `clip`), and split model parts other than the first (`…-00002-of-…`). Another folder is added with **Add a folder** (UTF-8 path). The record of a selected model accepts comma-separated tags and notes, stored in the database.
 
-Si aucun dossier de la liste n'existe, le panneau les affiche avec la mention « absent » : créez `%USERPROFILE%\models` et déposez-y les fichiers.
+If none of the folders in the list exist, the page shows them as "absent": create `%USERPROFILE%\models` and put the files there.
 
-## Visite de l'interface
+## A tour of the interface
 
-Les noms ci-dessous sont ceux des panneaux et des contrôles.
+The names below are the page titles and the controls.
 
-### Bibliothèque
+### Library
 
-But : voir ce que la machine possède déjà, sans charger les poids.
+Purpose: see what the machine already has, without loading the weights.
 
-Exemple. Vous avez un Q4_K_M pour le quotidien et un Q8_0 pour comparer. Après le scan, filtrez avec « Filtrer les modèles... », cliquez la ligne Q4_K_M, mettez l'étiquette `quotidien` et une note (« tient en 8 Go à 8k »), puis **Enregistrer**. Le bandeau de répartition montre les octets par type de tenseur. **Métadonnées** ouvre les clés GGUF, avec un filtre.
+Example. You have a Q4_K_M for everyday use and a Q8_0 to compare. After the scan, filter with the search field, click the Q4_K_M row, set the tag `everyday` and a note ("fits in 8 GB at 8k"), then **Save**. The weight-layout bar shows bytes per tensor type. **GGUF metadata** opens the GGUF keys, with a filter.
 
-### Planificateur de VRAM
+### VRAM planner
 
-But : savoir où part la mémoire avant de charger, puis vérifier sur la carte.
+Purpose: see where the memory goes before loading, then check it on the GPU.
 
-Exemple, sur une RTX 4060 Ti avec gemma-4-E4B en Q4_K_M. Choisissez le modèle. Réglez le contexte (4k, 8k, 32k…), le cache K et le cache V (`f16`, `q8_0`, `q4_0`…), la flash attention et la case **Cache SWA complet**. Le graphique empile poids, cache KV, tampons et overhead, côté GPU et CPU, avec la VRAM totale et la VRAM déjà prise. **Couches max qui tiennent** propose un déchargement qui reste dans la mémoire libre. **Vérifier réellement** charge le modèle, mesure l'écart, le décharge et l'inscrit dans l'historique.
+Example, on an RTX 4060 Ti with gemma-4-E4B in Q4_K_M. Choose the model. Set the context (4k, 8k, 32k…), the K cache and the V cache (`f16`, `q8_0`, `q4_0`…), flash attention, and **Full SWA cache**. The chart stacks weights, KV cache, buffers, and overhead, on the GPU and the CPU, with total VRAM and VRAM already in use. **Max layers that fit** suggests an offload that stays inside free memory. **Verify for real** loads the model, measures the gap, unloads it, and writes that into the history.
 
-Mesures de référence sur cette carte, gemma-4-E4B Q4_K_M : écart de −1,1 % à +0,4 % tout sur GPU (contexte 4k à 32k, cache f16 ou q8_0, avec ou sans flash attention) ; +7 % en déchargement partiel (`--ngl 20`). La mesure NVML est globale : un autre programme peut la faire bouger.
+Reference measurements on this GPU, gemma-4-E4B Q4_K_M: a gap of −1.1% to +0.4% with everything on the GPU (context 4k to 32k, f16 or q8_0 cache, with or without flash attention); +7% with partial offload (`--ngl 20`). The NVML measurement is global: another program can move it.
 
-Modèles à fenêtre glissante (Gemma) : llama.cpp alloue par défaut le cache de ces couches sur tout le contexte (case cochée, `--swa-full 1`). Décocher **Cache SWA complet** (`--swa-full 0`) le limite à la fenêtre. Sur gemma-4-E4B, à 32k tokens : 5,3 Go → 4,0 Go de VRAM. Revenir en arrière dans la séquence n'est alors plus possible.
+Sliding-window models (Gemma): llama.cpp allocates the cache of those layers for the whole context by default (box checked, `--swa-full 1`). Unchecking **Full SWA cache** (`--swa-full 0`) limits it to the window. On gemma-4-E4B, at 32k tokens: 5.3 GB down to 4.0 GB of VRAM. Rewinding in the sequence is then no longer possible.
 
-Un build CPU affiche que la vérification ne valide pas une estimation CUDA.
+A CPU build says that verification does not validate a CUDA estimate.
 
-### Banc d'essai
+### Bench
 
-But : comparer des réglages, pas une seule génération.
+Purpose: compare settings, not a single generation.
 
-Trois onglets : **Campagne**, **Résultats**, **Historique**.
+Three tabs: **Campaign**, **Results**, **History**.
 
-Exemple. Modèle Q4_K_M, nom « couches et contexte », couches GPU `0,20,99`, contextes `4096`, types KV `f16,q8_0`, flash attention `1`, ubatch `512`, 512 tokens de consigne, 128 générés, 5 répétitions. Le panneau annonce le nombre de configurations (produit des listes, plafond 10 000). **Lancer** enchaîne les mesures. **Résultats** montre, pour chaque réglage, la moyenne et l'écart-type du préremplissage (pp) et de la génération (tg), le temps jusqu'au premier token, le pic de VRAM et les aberrations. **Enregistrer** range la campagne. **Exporter CSV** ou **Exporter Markdown** écrit à côté du chemin proposé, par défaut sous `Documents\BancLocal`. **Historique** trace les débits d'un modèle dans le temps ; le survol d'un point rappelle la config et la version de llama.cpp.
+Example. Q4_K_M model, name "layers and context", GPU layers `0,20,99`, contexts `4096`, KV types `f16,q8_0`, flash attention `1`, ubatch `512`, 512 prompt tokens, 128 generated, 5 repetitions. The page reports how many configurations that is (the product of the lists, capped at 10,000). **Run campaign** runs the measurements. **Results** shows, for each setting, the mean and standard deviation of prefill (pp) and generation (tg), time to first token, peak VRAM, and outliers. **Save** stores the campaign. **CSV** or **Markdown** writes next to the path you give, by default under `Documents\WaffleIron`. **History** plots one model's throughput over time; hovering a point recalls the config and the llama.cpp version.
 
-### Laboratoire d'échantillonnage
+### Sampler lab
 
-But : voir le prochain token, pas seulement le texte final.
+Purpose: see the next token, not only the final text.
 
-Exemple. Sélectionnez le modèle, laissez la consigne « Décris un paysage au printemps. » (ou la vôtre), cochez **Modèle de conversation** si le GGUF a un modèle de chat, puis **Démarrer**. Vingt candidats s'affichent : barre pâle pour la probabilité brute, barre accentuée après température, top-k, top-p, min-p et pénalités. Cliquez un candidat pour forcer ce token et ouvrir une branche. **Pas suivant** laisse le tirage décider. **Générer N** enchaîne. Le texte coloré suit la probabilité du token choisi. L'arbre **Branches** permet de revenir sur un nœud (le cache est recalculé). Les curseurs se règlent sans relancer le modèle : température 0,8, top-k 40, top-p 0,95, min-p 0,05, graine 42 au départ.
+Example. Select the model, leave the prompt "Describe a landscape in spring." (or write your own), check **Chat template** if the GGUF has a chat template, then **Start**. Twenty candidates appear: a pale bar for the raw probability, an accent bar after temperature, top-k, top-p, min-p, and penalties. Click a candidate to force that token and open a branch. **Next step** lets the sampler decide. **Generate** runs several steps. The colored text follows the probability of the chosen token. The **Branches** tree jumps back to a node (the cache is recomputed). The sliders apply without reloading the model: temperature 0.8, top-k 40, top-p 0.95, min-p 0.05, seed 42 at the start.
 
-### Comparateur
+### Comparator
 
-But : la même consigne, deux modèles ou deux quantifications, l'un après l'autre pour ne pas additionner leur VRAM.
+Purpose: the same prompt, two models or two quantizations, one after the other so their VRAM is not added together.
 
-Exemple. Colonne A : le Q4_K_M. Colonne B : le Q8_0 du même modèle. Consigne « Explique le cycle de l'eau en quelques phrases. », 256 tokens, température 0, graine 42. **Lancer**. Les textes se remplissent tour à tour. Le tableau marque d'une étoile le meilleur débit de lecture, le meilleur débit de génération, le chargement le plus court et, si vous cochez **Mesurer la perplexité**, la perplexité la plus basse sur le texte de référence (un récit neutre déjà présent dans le champ, que vous pouvez remplacer). Un avertissement s'affiche si les deux côtés ont exactement les mêmes réglages.
+Example. Column A: the Q4_K_M. Column B: the Q8_0 of the same model. Prompt "Explain the water cycle in a few sentences.", 256 tokens, temperature 0, seed 42. **Run**. The texts fill in one after the other. The table marks with a star the best prefill throughput, the best generation throughput, the shortest load, and, if you check **Measure perplexity**, the lowest perplexity on the reference text (a neutral passage already in the field, which you can replace). A warning appears when both sides have exactly the same settings.
 
-### Moniteur
+### Monitor
 
-But : la carte pendant qu'un autre module travaille.
+Purpose: the GPU while another page is working.
 
-Le curseur **Historique (minutes)** va de 1 à 10. Les courbes couvrent l'utilisation GPU, la VRAM (et sa capacité), la température, la puissance, la fréquence SM, et le débit de génération publié par le laboratoire. Sans NVML, le panneau explique pourquoi (pilote absent, pas de carte NVIDIA) et les autres modules restent utilisables.
+The history window runs from 1 to 10 minutes. The curves cover GPU utilization, VRAM (and its capacity), temperature, power, SM clock, and the generation throughput published by the sampler lab. Without NVML, the page explains why (driver missing, no NVIDIA GPU) and the other pages stay usable.
 
-## Ligne de commande
+## Command line
 
-`banc.exe` est à côté de `BancLocal.exe` dans le dossier de build (`build\cuda-release-local` ou `build\cpu-release`). Depuis un terminal :
+`waffle.exe` sits next to `WaffleIron.exe` in the build directory (`build\cuda-release-local` or `build\cpu-release`). From a terminal:
 
 ```text
-banc scan [dossiers…]          indexe les modèles GGUF
-banc list                      liste la bibliothèque
-banc info <modèle>             métadonnées GGUF
-banc plan <modèle> --ctx 8192 --ctk q8_0 --ctv q8_0 --fa 1 [--swa-full 0] [--verify]
-banc bench <modèle> --ngl 0,20,99 --ctx 4096 --reps 5
-banc campaigns | history <modèle> | export <id> --md
-banc gpu                       état de la carte (NVML)
+waffle scan [folders…]         index GGUF models
+waffle list                    list the library
+waffle info <model>            GGUF metadata
+waffle plan <model> --ctx 8192 --ctk q8_0 --ctv q8_0 --fa 1 [--swa-full 0] [--verify]
+waffle bench <model> --ngl 0,20,99 --ctx 4096 --reps 5
+waffle campaigns | history <model> | export <id> --md
+waffle gpu                     GPU state (NVML)
 ```
 
-`banc` et `banc <commande> --help` détaillent les options. `<modèle>` est un chemin de fichier ou une sous-chaîne unique du nom en base. `--db CHEMIN` change la base (défaut : `%LOCALAPPDATA%\BancLocal\banc.db`).
+`waffle` and `waffle <command> --help` list the options. `<model>` is a file path or a unique substring of the name in the database. `--db PATH` changes the database (default: `%LOCALAPPDATA%\WaffleIron\waffle.db`).
 
-`banc plan --verify` charge réellement le modèle, mesure la VRAM prise et affiche l'écart avec l'estimation, ainsi que les allocations annoncées par llama.cpp. Les chiffres cités plus haut (RTX 4060 Ti, gemma-4-E4B Q4_K_M) viennent de cette vérification.
+`waffle plan --verify` actually loads the model, measures the VRAM it took, and prints the gap against the estimate, plus the allocations llama.cpp reported. The figures cited above (RTX 4060 Ti, gemma-4-E4B Q4_K_M) come from that check.
 
-`banc bench` accepte des listes séparées par des virgules pour `--ngl`, `--ctx`, `--ctk`, `--fa`, `--pp`, `--tg` et `--reps`. La campagne est enregistrée et le tableau Markdown est imprimé. `banc export <id> --csv -o fichier.csv` ou `--md` ressort une campagne.
+`waffle bench` accepts comma-separated lists for `--ngl`, `--ctx`, `--ctk`, `--fa`, `--pp`, `--tg`, and `--reps`. The campaign is saved and the Markdown table is printed. `waffle export <id> --csv -o file.csv` or `--md` writes a campaign back out.
 
-## Compilation avancée
+## Advanced build
 
-Les presets versionnés sont dans `CMakePresets.json`. `install.cmd` ne les modifie pas.
+The versioned presets are in `CMakePresets.json`. `install.cmd` does not modify them.
 
-| Preset | Usage |
+| Preset | Use |
 |---|---|
-| `cpu-debug` | développement, tests |
-| `cpu-release` | Release CPU, celui de la CI |
-| `cuda-release` | Release CUDA, architecture `sm_89` (RTX série 40) |
-| `asan` | Debug CPU avec AddressSanitizer |
+| `cpu-debug` | development, tests |
+| `cpu-release` | CPU Release, the one CI uses |
+| `cuda-release` | CUDA Release, architecture `sm_89` (RTX 40 series) |
+| `asan` | CPU Debug with AddressSanitizer |
 
-Quand une carte est détectée, `install.cmd` écrit `CMakeUserPresets.json` (ignoré par Git) : un preset `cuda-release-local` qui hérite de `cuda-release` et remplace `CMAKE_CUDA_ARCHITECTURES` (par exemple `86` pour une RTX série 30, `89` pour une RTX série 40, `120` pour une RTX série 50). Le binaire va dans `build\cuda-release-local`. Le preset `cuda-release` du dépôt reste sur `sm_89` et son dossier `build\cuda-release`.
+When a GPU is detected, `install.cmd` writes `CMakeUserPresets.json` (gitignored): a `cuda-release-local` preset that inherits `cuda-release` and replaces `CMAKE_CUDA_ARCHITECTURES` (for example `86` for an RTX 30 series, `89` for an RTX 40 series, `120` for an RTX 50 series). The binary goes to `build\cuda-release-local`. The repository's `cuda-release` preset stays on `sm_89` and its `build\cuda-release` directory.
 
 ```bat
 scripts\dev.cmd cmake --preset cpu-debug
@@ -182,20 +184,20 @@ scripts\dev.cmd cmake --build build\cpu-debug
 scripts\dev.cmd ctest --preset cpu-debug
 ```
 
-`scripts\dev.cmd` ouvre l'environnement MSVC x64 (Visual Studio 2022 ou plus récent, repéré avec `vswhere`, sinon le chemin Visual Studio 2026 Community) et pointe `VCPKG_ROOT` vers le vcpkg de cette installation s'il n'est pas déjà défini.
+`scripts\dev.cmd` opens the MSVC x64 environment (Visual Studio 2022 or newer, found with `vswhere`, otherwise the Visual Studio 2026 Community path) and points `VCPKG_ROOT` at that install's vcpkg when it is not already set.
 
-Pour forcer une architecture sans passer par l'installeur : `install.cmd -Architecture 75`, ou `scripts\dev.cmd cmake --preset cuda-release -DCMAKE_CUDA_ARCHITECTURES=75`. Le toolkit doit connaître cette architecture (Ada `sm_89` : CUDA 11.8 ou plus ; Blackwell `sm_100` / `sm_120` : CUDA 12.8 ou plus).
+To force an architecture without the installer: `install.cmd -Architecture 75`, or `scripts\dev.cmd cmake --preset cuda-release -DCMAKE_CUDA_ARCHITECTURES=75`. The toolkit must know that architecture (Ada `sm_89`: CUDA 11.8 or newer; Blackwell `sm_100` / `sm_120`: CUDA 12.8 or newer).
 
-Tests :
+Tests:
 
 ```bat
 scripts\dev.cmd ctest --preset cpu-release
 install.cmd -Tests
 ```
 
-Les tests qui chargent un modèle utilisent `BANC_TEST_MODEL` (chemin d'un GGUF), sinon `tests\data\tiny-llama.gguf` (poids aléatoires, produit par `scripts\make_tiny_model.py`).
+Tests that load a model use `WAFFLE_TEST_MODEL` (path to a GGUF), otherwise `tests\data\tiny-llama.gguf` (random weights, produced by `scripts\make_tiny_model.py`).
 
-AddressSanitizer :
+AddressSanitizer:
 
 ```bat
 scripts\dev.cmd cmake --preset asan
@@ -203,71 +205,72 @@ scripts\dev.cmd cmake --build build\asan
 scripts\dev.cmd ctest --preset asan
 ```
 
-## Où sont les données
+## Where the data lives
 
-| Quoi | Où |
+| What | Where |
 |---|---|
-| Bibliothèque, campagnes, vérifications VRAM | `%LOCALAPPDATA%\BancLocal\banc.db` |
-| Disposition de l'interface | `imgui.ini` à côté de `BancLocal.exe` |
-| Polices facultatives | `assets\fonts\` à côté de l'exécutable (copiées au build) |
-| Binaires | `build\cpu-release\`, `build\cuda-release\` ou `build\cuda-release-local\` |
-| Dernier exécutable lancé par l'installeur | `build\banc-launch.txt` |
-| Preset CUDA local | `CMakeUserPresets.json` à la racine (non versionné) |
-| Journal d'installation | `build\install.log` |
-| Exports de campagnes | le chemin choisi, par défaut `Documents\BancLocal` |
+| Library, campaigns, VRAM checks | `%LOCALAPPDATA%\WaffleIron\waffle.db` |
+| Interface state | `imgui.ini` next to `WaffleIron.exe` |
+| Optional fonts | `assets\fonts\` next to the executable (copied at build time) |
+| Binaries | `build\cpu-release\`, `build\cuda-release\`, or `build\cuda-release-local\` |
+| Last executable started by the installer | `build\waffle-launch.txt` |
+| Local CUDA preset | `CMakeUserPresets.json` at the root (not versioned) |
+| Install log | `build\install.log` |
+| Campaign exports | the path you choose, by default `Documents\WaffleIron` |
 
-Effacer `banc.db` repart d'une bibliothèque vide ; le scan suivant la reconstruit. Les fichiers GGUF ne sont pas dans cette base, seulement leurs fiches.
+Deleting `waffle.db` starts from an empty library; the next scan rebuilds it. The GGUF files are not in that database, only their records.
 
-## Dépannage
+## Troubleshooting
 
-**Un prérequis manque.** `install.cmd` s'arrête avec le composant et le lien. Après une modification de Visual Studio, ouvrez un nouveau terminal : un ancien `PATH` ne voit pas CMake ni Ninja. Relancez `install.cmd`.
+**A prerequisite is missing.** `install.cmd` stops and names the component and the link. After changing Visual Studio, open a new terminal: an old `PATH` does not see CMake or Ninja. Run `install.cmd` again.
 
-**`cl.exe`, CMake ou Ninja absents alors que Visual Studio est installé.** Modifiez l'installation et cochez les outils MSVC et « Outils CMake C++ pour Windows ».
+**`cl.exe`, CMake, or Ninja are missing even though Visual Studio is installed.** Modify the installation and select the MSVC tools and "C++ CMake tools for Windows".
 
-**vcpkg introuvable.** Cochez « Gestionnaire de package vcpkg », ou clonez https://github.com/microsoft/vcpkg , lancez `bootstrap-vcpkg.bat`, puis `set VCPKG_ROOT=C:\vcpkg` avant `install.cmd`.
+**vcpkg not found.** Select "vcpkg package manager", or clone https://github.com/microsoft/vcpkg , run `bootstrap-vcpkg.bat`, then `set VCPKG_ROOT=C:\vcpkg` before `install.cmd`.
 
-**Le sous-module est vide.** `install.cmd` lance `git submodule update --init --recursive`. Si le dossier n'est pas un clone (`git clone`), récupérez le dépôt ainsi plutôt qu'avec un zip.
+**The submodule is empty.** `install.cmd` runs `git submodule update --init --recursive`. If the folder is not a clone (`git clone`), get the repository that way rather than from a zip.
 
-**La compilation CUDA échoue sur l'architecture.** Le message de `nvcc` indique souvent un toolkit trop ancien pour la carte. Installez un toolkit adapté, ou imposez `-Architecture`. Sans GPU détecté, `-Cuda` retombe sur le preset `sm_89`.
+**The CUDA build fails on the architecture.** The `nvcc` message often means the toolkit is too old for the GPU. Install a suitable toolkit, or set `-Architecture`. With no GPU detected, `-Cuda` falls back to the `sm_89` preset.
 
-**La compilation est tuée (mémoire).** Relancez `install.cmd` : Ninja reprend. Si ça se reproduit : `scripts\dev.cmd cmake --build build\cuda-release-local --parallel 2`.
+**The build is killed (memory).** Run `install.cmd` again: Ninja resumes. If it keeps happening: `scripts\dev.cmd cmake --build build\cuda-release-local --parallel 2`.
 
-**L'interface ne montre aucun modèle.** Regardez la liste du panneau Bibliothèque. Le dossier doit exister avant le scan. Les visionneurs `mmproj` et les shards autres que le premier sont ignorés. Si Ollama n'est pas dans le profil, la variable `OLLAMA_MODELS` doit pointer vers la bibliothèque. **Ajouter un dossier...** couvre un emplacement personnalisé de LM Studio.
+**The interface shows no models.** Look at the list on the Library page. The folder must exist before the scan. `mmproj` vision files and shards other than the first are ignored. If Ollama is not under the profile, `OLLAMA_MODELS` must point at the library. **Add a folder** covers a custom LM Studio location.
 
-**« Impossible d'initialiser DirectX 11 ».** Le pilote graphique ne fournit pas DirectX 11. Mettez-le à jour. Un repli WARP est tenté seulement dans certains cas d'absence de pilote matériel.
+**"Cannot initialize DirectX 11."** The graphics driver does not provide DirectX 11. Update it. A WARP fallback is tried only in some cases where no hardware driver is present.
 
-**Le moniteur dit NVML indisponible.** Pas de carte NVIDIA, ou pilote trop ancien. Le reste de l'atelier fonctionne. Un build CPU n'empêche pas NVML.
+**The monitor says NVML is unavailable.** No NVIDIA GPU, or a driver that is too old. The rest of the workbench still works. A CPU build does not block NVML.
 
-**Les accents sont illisibles dans `cmd.exe`.** La console est encore en page OEM. `install.cmd` passe en UTF-8. Dans un terminal déjà ouvert : `chcp 65001`. Windows Terminal le fait en général tout seul. Les sources et ce fichier sont en UTF-8.
+**Accents are unreadable in `cmd.exe`.** The console is still on an OEM code page. `install.cmd` switches to UTF-8. In a terminal that is already open: `chcp 65001`. Windows Terminal usually does this on its own. The sources and this file are UTF-8.
 
-**Le build CUDA ne semble pas utiliser la bonne carte.** Vérifiez le preset affiché par `install.cmd` et `CMakeUserPresets.json`. `cmake --preset cuda-release` reconstruit l'autre dossier, celui figé en `sm_89`.
+**The CUDA build does not seem to target the right GPU.** Check the preset printed by `install.cmd` and `CMakeUserPresets.json`. `cmake --preset cuda-release` rebuilds the other directory, the one fixed at `sm_89`.
 
-**Deux `BancLocal.exe`.** `lancer.cmd` ouvre celui noté dans `build\banc-launch.txt`, sinon le plus récent parmi les dossiers connus.
+**Two `WaffleIron.exe`.** `launch.cmd` opens the one recorded in `build\waffle-launch.txt`, otherwise the newest among the known directories.
 
 ## Architecture
 
 ```
-external/llama.cpp/   sous-module épinglé (mis à jour volontairement, tests en garde-fou)
-src/core/             aucun code d'interface : gguf_reader, model_roots, engine, vram_planner, bench, sampler_lab, comparator, telemetry
+external/llama.cpp/   pinned submodule (updated on purpose, tests as a safety net)
+src/core/             no interface code: gguf_reader, model_roots, engine, vram_planner, bench, sampler_lab, comparator, telemetry
 src/store/            SQLite
-src/cli/              banc.exe
-src/ui/               Dear ImGui (docking) + ImPlot + DirectX 11
+src/cli/              waffle.exe
+src/ui/               Dear ImGui + ImPlot + DirectX 11
 tests/                Catch2
-scripts/dev.cmd       environnement MSVC pour les commandes manuelles
-install.cmd           installation et lancement
+scripts/dev.cmd       MSVC environment for manual commands
+install.cmd           install and launch
+launch.cmd            open the last built interface
 ```
 
-Règle centrale : **un seul thread parle à llama.cpp** (`Engine`). L'interface soumet des travaux et reçoit les résultats par `std::future`.
+Central rule: **a single thread talks to llama.cpp** (`Engine`). The interface submits work and receives results through `std::future`.
 
-La CI (`.github/workflows/ci.yml`) compile et teste le preset `cpu-release` sous Windows. Elle n'utilise pas `install.cmd`.
+CI (`.github/workflows/ci.yml`) builds and tests the `cpu-release` preset on Windows. It does not use `install.cmd`.
 
-## Polices
+## Fonts
 
-L'interface utilise Inter et les icônes Lucide si `Inter-Regular.ttf`, `Inter-SemiBold.ttf` et `lucide.ttf` sont dans `assets/fonts/` (voir le README de ce dossier). Sinon, la police intégrée d'ImGui. Aucun téléchargement n'est fait à l'installation.
+The interface uses Inter and the Lucide icons when `Inter-Regular.ttf`, `Inter-SemiBold.ttf`, and `lucide.ttf` are in `assets/fonts/` (see that folder's README). Otherwise, ImGui's built-in font. Nothing is downloaded at install time.
 
-- Inter : https://github.com/rsms/inter (SIL Open Font License 1.1)
-- Lucide : https://github.com/lucide-icons/lucide (ISC, plage privée)
+- Inter: https://github.com/rsms/inter (SIL Open Font License 1.1)
+- Lucide: https://github.com/lucide-icons/lucide (ISC, private-use range)
 
-## Licence
+## License
 
-MIT, comme llama.cpp. Le texte est dans `LICENSE` (copyright 2026 Anarchy). Les polices, si vous les redistribuez, gardent leur propre licence.
+MIT, like llama.cpp. The text is in `LICENSE` (copyright 2026 Anarchy). The fonts, if you redistribute them, keep their own license.

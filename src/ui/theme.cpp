@@ -1,10 +1,10 @@
 #include "ui/theme.hpp"
 #include <implot.h>
 #include <cstdlib>
-namespace banc::ui {
+namespace waffle::ui {
 namespace {
 Fonts g_fonts;
-// Premier fichier existant parmi les candidats (assets puis polices Windows).
+// First existing file among the candidates (assets, then Windows fonts).
 std::filesystem::path first_existing(std::initializer_list<std::filesystem::path> candidates) {
     for (const auto& p : candidates)
         if (std::filesystem::exists(p)) return p;
@@ -89,7 +89,7 @@ bool apply_theme(float dpi, const std::filesystem::path& assets) {
     ImPlot::StyleColorsDark();
     auto& ps = ImPlot::GetStyle();
     static const ImVec4 plot_colors[] = {col::accent, col::teal, col::mauve, col::amber};
-    ps.Colormap = ImPlot::AddColormap("Banc Local", plot_colors, 4);
+    ps.Colormap = ImPlot::AddColormap("Waffle Iron", plot_colors, 4);
     ps.PlotPadding = {10 * dpi, 10 * dpi};
     ps.LabelPadding = {6 * dpi, 4 * dpi};
     ps.LegendPadding = {8 * dpi, 6 * dpi};
@@ -105,7 +105,7 @@ bool apply_theme(float dpi, const std::filesystem::path& assets) {
     ps.Colors[ImPlotCol_AxisGrid] = {1, 1, 1, 0.06f};
     ps.Colors[ImPlotCol_AxisTick] = {1, 1, 1, 0.10f};
 
-    // Polices : Inter (assets) si présente, sinon Segoe UI fournie avec Windows ; Cascadia Mono / Consolas en chasse fixe.
+    // Fonts: Inter from assets when present, otherwise Segoe UI shipped with Windows; Cascadia Mono / Consolas for monospace.
     auto& io = ImGui::GetIO();
     const float size = 15.5f * dpi;
     const auto win = windows_fonts();
@@ -118,7 +118,7 @@ bool apply_theme(float dpi, const std::filesystem::path& assets) {
         cfg.SizePixels = size;
         g_fonts.regular = io.Fonts->AddFontDefault(&cfg);
     }
-    // Symboles des jetons invisibles (␣ ↵ ⇥) et flèches : Segoe UI Symbol en complément.
+    // Symbols for invisible tokens (␣ ↵ ⇥) and arrows: Segoe UI Symbol merged in.
     if (const auto symbols = win / "seguisym.ttf"; std::filesystem::exists(symbols)) {
         ImFontConfig cfg;
         cfg.MergeMode = true;
@@ -141,4 +141,4 @@ bool apply_theme(float dpi, const std::filesystem::path& assets) {
     s.FontSizeBase = size;
     return merged;
 }
-} // namespace banc::ui
+} // namespace waffle::ui

@@ -17,12 +17,12 @@ class MonitorView final : public View {
         const std::vector<double>* x;
         const std::vector<double>* y;
         ImVec4 color;
-        double y_min, y_max; // y_max <= y_min : ajustement automatique
+        double y_min, y_max; // y_max <= y_min: fit the axis to the data
         const std::vector<double>* ceiling = nullptr;
     };
     void chart(const Series& s, ImVec2 size) {
         ImGui::PushID(s.title);
-        if (begin_card("##graphe", size, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
+        if (begin_card("##chart", size, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
             push_font(fonts().semibold, .95f);
             ImGui::TextUnformatted(s.title);
             ImGui::PopFont();
@@ -38,7 +38,7 @@ class MonitorView final : public View {
                 ImGui::PopFont();
             }
             ImPlot::PushStyleVar(ImPlotStyleVar_PlotPadding, ImVec2(0, em(.3f)));
-            if (ImPlot::BeginPlot("##courbe", {-1, ImGui::GetContentRegionAvail().y},
+            if (ImPlot::BeginPlot("##curve", {-1, ImGui::GetContentRegionAvail().y},
                                   ImPlotFlags_NoTitle | ImPlotFlags_NoMenus | ImPlotFlags_NoBoxSelect |
                                       (s.ceiling ? 0 : ImPlotFlags_NoLegend))) {
                 ImPlot::SetupAxis(ImAxis_X1, nullptr, ImPlotAxisFlags_NoHighlight);
@@ -49,13 +49,14 @@ class MonitorView final : public View {
                                   ImPlotAxisFlags_NoHighlight | (fixed ? 0 : ImPlotAxisFlags_AutoFit));
                 if (fixed) ImPlot::SetupAxisLimits(ImAxis_Y1, s.y_min, s.y_max, ImPlotCond_Always);
                 if (s.ceiling)
-                    ImPlot::SetupLegend(ImPlotLocation_SouthEast, ImPlotLegendFlags_Horizontal | ImPlotLegendFlags_NoButtons);
+                    ImPlot::SetupLegend(ImPlotLocation_SouthEast,
+                                        ImPlotLegendFlags_Horizontal | ImPlotLegendFlags_NoButtons);
                 const int n = static_cast<int>(s.x->size());
                 if (n > 0) {
                     ImPlotSpec fill;
                     fill.FillColor = s.color;
                     fill.FillAlpha = .16f;
-                    ImPlot::PlotShaded("##aire", s.x->data(), s.y->data(), n, 0.0, fill);
+                    ImPlot::PlotShaded("##area", s.x->data(), s.y->data(), n, 0.0, fill);
                     ImPlotSpec line;
                     line.LineColor = s.color;
                     line.LineWeight = 2.0f;
@@ -84,7 +85,7 @@ public:
     void draw(AppContext& ctx) override {
         if (!ctx.telemetry.available()) {
             if (begin_card("##nvml")) {
-                card_title("NVML indisponible");
+                card_title("NVML unavailable");
                 dim_wrapped((ctx.telemetry.error() + ". GPU measurements are not available.").c_str());
             }
             end_card();

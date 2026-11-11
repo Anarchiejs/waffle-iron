@@ -85,13 +85,15 @@ VramEstimate estimate_vram(const ModelInfo& model, const VramPlanInput& input) {
                 std::from_chars(value.data() + 1, value.data() + value.size(), vocab);
         }
     // KV cache, as in llama.cpp: shared layers (shared_kv_layers) have no cache; SWA layers
-    // keep pad256(min(n_ctx, window * sequences + ubatch)) cells (all of them if swa_full), with their own head dimensions.
+    // keep pad256(min(n_ctx, window * sequences + ubatch)) cells (all of them if swa_full), with their own head
+    // dimensions.
     const auto pad256 = [](uint64_t n) { return (n + 255) / 256 * 256; };
     const uint32_t n_layer_kv =
         model.shared_kv_layers < model.n_layer ? model.n_layer - model.shared_kv_layers : model.n_layer;
     const uint64_t swa_cells =
-        input.swa_full ? mul(input.n_ctx, input.n_seq)
-                       : std::min<uint64_t>(input.n_ctx, pad256(add(mul(model.sliding_window, input.n_seq), input.n_ubatch)));
+        input.swa_full
+            ? mul(input.n_ctx, input.n_seq)
+            : std::min<uint64_t>(input.n_ctx, pad256(add(mul(model.sliding_window, input.n_seq), input.n_ubatch)));
     for (uint32_t layer = 0; layer < n_layer_kv; ++layer) {
         const bool swa = model.sliding_window && layer < model.swa_layers.size() && model.swa_layers[layer];
         const uint32_t dim_k = swa && model.head_dim_k_swa ? model.head_dim_k_swa : model.head_dim_k;
@@ -119,9 +121,9 @@ VramEstimate estimate_vram(const ModelInfo& model, const VramPlanInput& input) {
         result.overhead_gpu = cuda_overhead;
     } else
         result.compute_cpu = compute;
-    result.notes.push_back("Compute buffers and CUDA overhead are approximate and should be checked against real measurements");
-    if (model.n_expert)
-        result.notes.push_back("MoE: every expert's weights are counted, including inactive experts");
+    result.notes.push_back(
+        "Compute buffers and CUDA overhead are approximate and should be checked against real measurements");
+    if (model.n_expert) result.notes.push_back("MoE: every expert's weights are counted, including inactive experts");
     if (!input.flash_attn && (input.type_v != "f16" && input.type_v != "f32" && input.type_v != "bf16"))
         result.notes.push_back("A quantized V cache requires flash attention at load time");
     (void)add(add(result.weights_gpu, result.kv_cache_gpu), add(result.compute_gpu, result.overhead_gpu));

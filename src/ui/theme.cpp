@@ -105,7 +105,8 @@ bool apply_theme(float dpi, const std::filesystem::path& assets) {
     ps.Colors[ImPlotCol_AxisGrid] = {1, 1, 1, 0.06f};
     ps.Colors[ImPlotCol_AxisTick] = {1, 1, 1, 0.10f};
 
-    // Fonts: Inter from assets when present, otherwise Segoe UI shipped with Windows; Cascadia Mono / Consolas for monospace.
+    // Fonts: Inter from assets when present, otherwise Segoe UI shipped with Windows; Cascadia Mono / Consolas for
+    // monospace.
     auto& io = ImGui::GetIO();
     const float size = 15.5f * dpi;
     const auto win = windows_fonts();

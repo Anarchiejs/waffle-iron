@@ -224,8 +224,7 @@ waffle COMMAND --help   Help for that command.
 const char* kScanHelp = "waffle scan [folders...]\n\nWalks the folders (or the default model folders) and records each "
                         "GGUF.\n";
 const char* kListHelp = "waffle list\n\nShows the library stored in the database.\n";
-const char* kInfoHelp =
-    "waffle info MODEL\n\nReads the file and prints the main metadata, then bytes by type.\n";
+const char* kInfoHelp = "waffle info MODEL\n\nReads the file and prints the main metadata, then bytes by type.\n";
 const char* kPlanHelp = R"HELP(waffle plan MODEL [options]
 
   --ngl N            GPU layers (-1 = all)
@@ -507,8 +506,7 @@ void verify_plan(waffle::Store& store, const std::filesystem::path& path, const 
     std::vector<std::string> allocations;
     std::mutex allocations_mutex;
     engine.set_log_sink([&](int, std::string_view text) {
-        if (text.find("buffer size") == std::string_view::npos && text.find("cells") == std::string_view::npos)
-            return;
+        if (text.find("buffer size") == std::string_view::npos && text.find("cells") == std::string_view::npos) return;
         std::string line(text);
         while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) line.pop_back();
         std::lock_guard lock(allocations_mutex);

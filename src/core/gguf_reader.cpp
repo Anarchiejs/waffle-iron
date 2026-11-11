@@ -123,8 +123,8 @@ ModelInfo read_gguf(const std::filesystem::path& path, bool with_tensors) {
             if (id >= 0 && gguf_get_kv_type(ctx.get(), id) == GGUF_TYPE_ARRAY) {
                 const size_t n = gguf_get_arr_n(ctx.get(), id);
                 for (uint32_t il = 0; il < model.n_layer && il < n; ++il)
-                    model.swa_layers[il] = value_text(ctx.get(), id, true, il) == "true" ||
-                                           value_text(ctx.get(), id, true, il) == "1";
+                    model.swa_layers[il] =
+                        value_text(ctx.get(), id, true, il) == "true" || value_text(ctx.get(), id, true, il) == "1";
             } else if (id >= 0) {
                 const uint32_t period = integer(ctx.get(), key);
                 for (uint32_t il = 0; il < model.n_layer; ++il)

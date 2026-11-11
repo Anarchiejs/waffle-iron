@@ -29,9 +29,7 @@ class LibraryView final : public View {
 public:
     bool rescan = false;
     const char* title() const override { return "Library"; }
-    const char* subtitle() const override {
-        return "Your GGUF models: metadata, weight layout, tags, and notes.";
-    }
+    const char* subtitle() const override { return "Your GGUF models: metadata, weight layout, tags, and notes."; }
     const char* icon() const override { return ""; }
     // Indexes the known folders from the first frame, even when this page is not shown.
     void tick(AppContext& ctx) override {
@@ -107,14 +105,14 @@ public:
         if (avail.x >= em(48)) {
             // Master and detail side by side, each at full height.
             const float detail_w = std::clamp(avail.x * .34f, em(19), em(27));
-            if (begin_card("##Liste", {avail.x - detail_w - gap, avail.y})) list(ctx);
+            if (begin_card("##List", {avail.x - detail_w - gap, avail.y})) list(ctx);
             end_card();
             ImGui::SameLine(0, gap);
             if (begin_card("##Record", {detail_w, avail.y})) detail(ctx);
             end_card();
         } else {
             const float list_h = std::max(em(13), avail.y * .45f);
-            if (begin_card("##Liste", {0, list_h})) list(ctx);
+            if (begin_card("##List", {0, list_h})) list(ctx);
             end_card();
             if (begin_card("##Record", {0, std::max(em(16), ImGui::GetContentRegionAvail().y)})) detail(ctx);
             end_card();
@@ -129,8 +127,8 @@ private:
         const float avail = ImGui::GetContentRegionAvail().x;
         const float buttons = add_w + scan_w + style.ItemSpacing.x;
         ImGui::SetNextItemWidth(std::max(em(10), std::min(em(28), avail - buttons - style.ItemSpacing.x * 2)));
-        ImGui::InputTextWithHint("##Filter", "Search: name, file, architecture, quantization...",
-                                 filter_.data(), filter_.size());
+        ImGui::InputTextWithHint("##Filter", "Search: name, file, architecture, quantization...", filter_.data(),
+                                 filter_.size());
         ImGui::SameLine();
         char count[48];
         std::snprintf(count, sizeof count, ctx.library.size() == 1 ? "%zu model" : "%zu models", ctx.library.size());
@@ -151,7 +149,7 @@ private:
         if (ImGui::BeginPopup("Model folder")) {
             card_title("Add a model folder", "Full path of a folder that contains .gguf files.");
             ImGui::SetNextItemWidth(-FLT_MIN);
-            ImGui::InputTextWithHint("##Path", "D:\\Models", folder_.data(), folder_.size());
+            ImGui::InputTextWithHint("##Path", "%USERPROFILE%\\models", folder_.data(), folder_.size());
             if (primary_button("Add and scan") && folder_[0]) {
                 auto p = std::filesystem::u8path(folder_.data());
                 if (std::filesystem::is_directory(p)) {
@@ -320,9 +318,9 @@ private:
         ImGui::Dummy({0, em(.15f)});
         const float gap = ImGui::GetStyle().ItemSpacing.x;
         const float half = (ImGui::GetContentRegionAvail().x - gap) * .5f;
-        if (primary_button("Planifier la VRAM", {half, 0})) ctx.requested_page = 1;
+        if (primary_button("Plan VRAM", {half, 0})) ctx.requested_page = 1;
         ImGui::SameLine(0, gap);
-        if (ImGui::Button("Explorer au labo", {half, 0})) ctx.requested_page = 3;
+        if (ImGui::Button("Open in sampler", {half, 0})) ctx.requested_page = 3;
         ImGui::Dummy({0, em(.25f)});
         char layers[32];
         std::snprintf(layers, sizeof layers, "%u", m->n_layer);

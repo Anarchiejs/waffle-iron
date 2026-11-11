@@ -19,7 +19,8 @@ std::string path_utf8(const std::filesystem::path& path) {
     return {bytes.begin(), bytes.end()};
 }
 VramPlanInput plan_input(const LoadParams& p) {
-    return {p.n_gpu_layers, p.n_ctx, p.n_batch, p.n_ubatch, p.type_k, p.type_v, p.flash_attn != 0, p.n_seq_max, p.swa_full};
+    return {p.n_gpu_layers, p.n_ctx,           p.n_batch,   p.n_ubatch, p.type_k,
+            p.type_v,       p.flash_attn != 0, p.n_seq_max, p.swa_full};
 }
 std::string config_label(const LoadParams& p) {
     return "ngl=" + std::to_string(p.n_gpu_layers) + " ctx=" + std::to_string(p.n_ctx) + " kv=" + p.type_k + "/" +
@@ -150,8 +151,8 @@ class VramView final : public View {
                 ImPlot::SetupAxis(ImAxis_X1, nullptr, ImPlotAxisFlags_NoHighlight);
                 ImPlot::SetupAxis(ImAxis_Y1, nullptr, ImPlotAxisFlags_NoHighlight);
                 ImPlot::SetupAxisFormat(ImAxis_Y1, "%.1f Go");
-                ImPlot::SetupLegend(ImPlotLocation_North,
-                                    ImPlotLegendFlags_Outside | ImPlotLegendFlags_Horizontal | ImPlotLegendFlags_NoButtons);
+                ImPlot::SetupLegend(ImPlotLocation_North, ImPlotLegendFlags_Outside | ImPlotLegendFlags_Horizontal |
+                                                              ImPlotLegendFlags_NoButtons);
                 ImPlot::SetupAxisLimits(ImAxis_X1, -.6, 1.6, ImPlotCond_Always);
                 const double ymax =
                     static_cast<double>(std::max({estimate.total_gpu() + used, estimate.total_cpu(), capacity})) / GiB;
@@ -208,8 +209,7 @@ class VramView final : public View {
             history_path_ = path;
         }
         if (begin_card("##Checks")) {
-            card_title("Real checks",
-                       "NVML measures the whole GPU: other processes can move the result.");
+            card_title("Real checks", "NVML measures the whole GPU: other processes can move the result.");
             if (last_check_ && last_check_->model_path == path) {
                 const auto& check = *last_check_;
                 char gap[32] = "—";
@@ -247,7 +247,8 @@ class VramView final : public View {
                     ImGui::TextUnformatted(format_bytes(check.measured_gpu).c_str());
                     ImGui::TableNextColumn();
                     if (check.estimated_gpu)
-                        ImGui::Text("%+.1f %%", 100 * (static_cast<double>(check.measured_gpu) / check.estimated_gpu - 1));
+                        ImGui::Text("%+.1f %%",
+                                    100 * (static_cast<double>(check.measured_gpu) / check.estimated_gpu - 1));
                 }
                 ImGui::EndTable();
             }

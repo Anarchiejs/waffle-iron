@@ -44,7 +44,7 @@ static std::vector<std::string> split_values(const char* text) {
 static int integer(const std::string& s, int low, int high) {
     size_t end = 0;
     int v = std::stoi(s, &end);
-    if (end != s.size() || v < low || v > high) throw Error("Valeur hors limites : " + s);
+    if (end != s.size() || v < low || v > high) throw Error("Value out of range: " + s);
     return v;
 }
 static double history_time(const std::string& stamp) {
@@ -108,7 +108,8 @@ class BenchView final : public View {
         g.base.n_prompt = static_cast<uint32_t>(prompt_);
         g.base.n_gen = static_cast<uint32_t>(gen_);
         g.base.repetitions = reps_;
-        if (prompt_ < 1 || gen_ < 1 || reps_ < 1) throw Error("Prompt, generation, and repetition counts must be positive");
+        if (prompt_ < 1 || gen_ < 1 || reps_ < 1)
+            throw Error("Prompt, generation, and repetition counts must be positive");
         for (const auto& v : split_values(gpu_)) g.n_gpu_layers.push_back(integer(v, -1, 100000));
         for (const auto& v : split_values(ctx_)) g.n_ctx.push_back(static_cast<uint32_t>(integer(v, 32, 10000000)));
         g.kv_type = split_values(kv_);
@@ -127,7 +128,7 @@ class BenchView final : public View {
         field_label("Model");
         model_combo("##model", ctx, model_);
         field_label("Campaign name");
-        ImGui::InputText("##nom", name_, sizeof(name_));
+        ImGui::InputText("##name", name_, sizeof(name_));
         section_header("GRILLE");
         field_pair(
             [&](float w) {
@@ -220,9 +221,8 @@ class BenchView final : public View {
     }
     void results(AppContext& ctx) {
         if (output_.results.empty()) {
-            empty_state("No results",
-                        future_.valid() ? "The campaign is running; results appear when it finishes."
-                                        : "Run a campaign, or load one from the history.");
+            empty_state("No results", future_.valid() ? "The campaign is running; results appear when it finishes."
+                                                      : "Run a campaign, or load one from the history.");
             return;
         }
         if (primary_button("Save")) {
@@ -328,7 +328,8 @@ class BenchView final : public View {
                               ImPlotFlags_NoMenus | ImPlotFlags_NoBoxSelect)) {
             ImPlot::SetupAxis(ImAxis_X1, nullptr, ImPlotAxisFlags_NoHighlight);
             ImPlot::SetupAxis(ImAxis_Y1, "Prefill (pp) tok/s", ImPlotAxisFlags_NoHighlight);
-            ImPlot::SetupAxis(ImAxis_Y2, "Generation (tg) tok/s", ImPlotAxisFlags_Opposite | ImPlotAxisFlags_NoHighlight);
+            ImPlot::SetupAxis(ImAxis_Y2, "Generation (tg) tok/s",
+                              ImPlotAxisFlags_Opposite | ImPlotAxisFlags_NoHighlight);
             // Scales fixed on the highest point (bar + standard deviation) with a margin, so nothing is clipped.
             auto top = [](const std::vector<double>& v, const std::vector<double>& e) {
                 double m = 0;
@@ -353,18 +354,19 @@ class BenchView final : public View {
                 const double x = ImPlot::GetPlotMousePos(ImAxis_X1, ImAxis_Y1).x;
                 const long i = std::lround(x);
                 if (i >= 0 && i < static_cast<long>(output_.results.size()))
-                    ImGui::SetTooltip("#%ld  %s", i + 1, config_label(output_.results[static_cast<size_t>(i)].config).c_str());
+                    ImGui::SetTooltip("#%ld  %s", i + 1,
+                                      config_label(output_.results[static_cast<size_t>(i)].config).c_str());
             }
             ImPlot::EndPlot();
         }
     }
     void history(AppContext& ctx) {
-        const float button = ImGui::CalcTextSize("Actualiser").x + ImGui::GetStyle().FramePadding.x * 2;
-        bool changed = model_combo("##historique", ctx, history_model_,
-                                   std::min(em(26), ImGui::GetContentRegionAvail().x - button -
-                                                        ImGui::GetStyle().ItemSpacing.x));
+        const float button = ImGui::CalcTextSize("Refresh").x + ImGui::GetStyle().FramePadding.x * 2;
+        bool changed =
+            model_combo("##history", ctx, history_model_,
+                        std::min(em(26), ImGui::GetContentRegionAvail().x - button - ImGui::GetStyle().ItemSpacing.x));
         ImGui::SameLine();
-        if (ImGui::Button("Actualiser")) refresh_ = true;
+        if (ImGui::Button("Refresh")) refresh_ = true;
         if (refresh_ || changed) {
             records_ = ctx.store.list_campaigns();
             history_.clear();
@@ -374,15 +376,15 @@ class BenchView final : public View {
         }
         if (records_.empty()) {
             empty_state("No saved campaign", "Campaigns saved from the Results tab "
-                                                       "appear here.");
+                                             "appear here.");
             return;
         }
         // Just the height of the rows, capped so the chart still has room.
         const float row_h = ImGui::GetFrameHeight() + ImGui::GetStyle().CellPadding.y * 2;
-        const float list_h = std::min(row_h * static_cast<float>(records_.size() + 1) + em(.3f),
-                                      history_.empty() ? ImGui::GetContentRegionAvail().y
-                                                       : std::clamp(ImGui::GetContentRegionAvail().y * .4f, em(8),
-                                                                    em(18)));
+        const float list_h =
+            std::min(row_h * static_cast<float>(records_.size() + 1) + em(.3f),
+                     history_.empty() ? ImGui::GetContentRegionAvail().y
+                                      : std::clamp(ImGui::GetContentRegionAvail().y * .4f, em(8), em(18)));
         if (ImGui::BeginTable("campaigns", 5,
                               ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_ScrollY |
                                   ImGuiTableFlags_SizingFixedFit,
@@ -422,12 +424,12 @@ class BenchView final : public View {
                     }
                 }
                 ImGui::SameLine();
-                if (ImGui::SmallButton("Supprimer")) ImGui::OpenPopup("Confirmer");
-                if (ImGui::BeginPopup("Confirmer")) {
+                if (ImGui::SmallButton("Delete")) ImGui::OpenPopup("Confirm");
+                if (ImGui::BeginPopup("Confirm")) {
                     ImGui::TextUnformatted("Delete this campaign?");
                     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(.55f, .22f, .25f, 1));
                     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(.68f, .28f, .31f, 1));
-                    if (ImGui::Button("Confirmer la suppression")) {
+                    if (ImGui::Button("Confirm deletion")) {
                         try {
                             ctx.store.delete_campaign(record.id);
                             refresh_ = true;
@@ -465,7 +467,8 @@ class BenchView final : public View {
                               ImPlotFlags_NoMenus | ImPlotFlags_NoBoxSelect)) {
             // Prefill (pp) on the left, generation (tg) on the right: on one axis, tg would be crushed against zero.
             ImPlot::SetupAxes(nullptr, "Prefill (pp) tok/s", ImPlotAxisFlags_NoHighlight, ImPlotAxisFlags_NoHighlight);
-            ImPlot::SetupAxis(ImAxis_Y2, "Generation (tg) tok/s", ImPlotAxisFlags_Opposite | ImPlotAxisFlags_NoHighlight);
+            ImPlot::SetupAxis(ImAxis_Y2, "Generation (tg) tok/s",
+                              ImPlotAxisFlags_Opposite | ImPlotAxisFlags_NoHighlight);
             double pp_max = 1, tg_max = 1;
             for (const auto& h : history_) {
                 pp_max = std::max(pp_max, h.pp_mean);
@@ -540,8 +543,8 @@ class BenchView final : public View {
 public:
     BenchView() {
         const char* home = std::getenv("USERPROFILE");
-        auto path = (home ? std::filesystem::path(home) : std::filesystem::current_path()) / "Documents" / "WaffleIron" /
-                    "campaign.csv";
+        auto path = (home ? std::filesystem::path(home) : std::filesystem::current_path()) / "Documents" /
+                    "WaffleIron" / "campaign.csv";
         auto utf8 = path.u8string();
         std::snprintf(path_, sizeof(path_), "%s", reinterpret_cast<const char*>(utf8.c_str()));
     }
@@ -584,14 +587,14 @@ public:
                 if (begin_card("##Campaign")) campaign(ctx);
                 end_card();
             }
-            if (begin_card("##Sorties", {0, wide ? avail.y : std::max(em(28), ImGui::GetContentRegionAvail().y)},
+            if (begin_card("##Output", {0, wide ? avail.y : std::max(em(28), ImGui::GetContentRegionAvail().y)},
                            ImGuiWindowFlags_NoScrollbar)) {
                 for (const auto& error : output_.errors) {
                     ImGui::PushStyleColor(ImGuiCol_Text, col::bad);
                     ImGui::TextWrapped("Failed configuration: %s", error.c_str());
                     ImGui::PopStyleColor();
                 }
-                if (ImGui::BeginTabBar("banc")) {
+                if (ImGui::BeginTabBar("bench")) {
                     if (ImGui::BeginTabItem("Results")) {
                         ImGui::Dummy({0, em(.2f)});
                         try {

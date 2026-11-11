@@ -146,7 +146,7 @@ class SamplerView final : public View {
             },
             [&](float w) {
                 field_label("Window", "How many recent tokens are counted.", w);
-                changed |= ImGui::SliderInt("##fen", &settings_.penalty_last_n, 0, 4096);
+                changed |= ImGui::SliderInt("##window", &settings_.penalty_last_n, 0, 4096);
             });
         field_pair(
             [&](float w) {
@@ -203,7 +203,8 @@ class SamplerView final : public View {
             push_font(nullptr, .85f);
             const float lw = ImGui::CalcTextSize(legend).x + em(5) + ImGui::CalcTextSize("forte").x + em(1);
             const ImVec2 back = ImGui::GetCursorPos();
-            ImGui::SetCursorPos({ImGui::GetWindowContentRegionMax().x - lw, ImGui::GetStyle().WindowPadding.y + em(.1f)});
+            ImGui::SetCursorPos(
+                {ImGui::GetWindowContentRegionMax().x - lw, ImGui::GetStyle().WindowPadding.y + em(.1f)});
             ImGui::TextDisabled("%s", legend);
             ImGui::SameLine();
             const ImVec2 p = ImGui::GetCursorScreenPos();
@@ -220,9 +221,8 @@ class SamplerView final : public View {
             ImGui::SetCursorPos(back);
         }
         if (!started_) {
-            empty_state("No generation yet",
-                        "Choose a model, write a prompt, then click Start. Each step shows the "
-                        "candidate tokens and their probability.");
+            empty_state("No generation yet", "Choose a model, write a prompt, then click Start. Each step shows the "
+                                             "candidate tokens and their probability.");
             return;
         }
         std::vector<const LabNode*> path;
@@ -277,7 +277,7 @@ class SamplerView final : public View {
     }
     void candidates(AppContext& ctx) {
         card_title("Candidates", "Pale bar: raw probability. Colored bar: after sampling. Click to "
-                                "choose.");
+                                 "choose.");
         if (snapshot_.candidates.empty()) {
             dim_wrapped(started_ ? "No candidates at this node." : "Candidates appear after you start.");
             return;
@@ -313,8 +313,7 @@ class SamplerView final : public View {
             draw->AddText({bar_x - em(.5f) - nw, ty}, ImGui::GetColorU32(col::dim), number);
             const auto label = visible_piece(c.piece);
             draw->PushClipRect({bar_x, pos.y}, {bar_x + bar_w, pos.y + height}, true);
-            draw->AddText(fonts().mono, em(1), {bar_x + em(.6f), ty}, ImGui::GetColorU32(ImGuiCol_Text),
-                          label.c_str());
+            draw->AddText(fonts().mono, em(1), {bar_x + em(.6f), ty}, ImGui::GetColorU32(ImGuiCol_Text), label.c_str());
             draw->PopClipRect();
             char percent[24];
             std::snprintf(percent, sizeof percent, "%.2f %%", 100.f * c.p_final);
@@ -369,7 +368,7 @@ public:
             if (begin_card("##Settings", {side_width(.3f, 20, 25), avail.y})) settings_panel(ctx);
             end_card();
             ImGui::SameLine(0, gap);
-            ImGui::BeginChild("##Atelier", {0, avail.y}, ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+            ImGui::BeginChild("##Lab", {0, avail.y}, ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
         } else {
             if (begin_card("##Settings")) settings_panel(ctx);
             end_card();
@@ -379,7 +378,7 @@ public:
         const ImVec2 area = ImGui::GetContentRegionAvail();
         const float sy = ImGui::GetStyle().ItemSpacing.y;
         const float text_h = wide ? std::max(em(9), area.y * .38f) : em(14);
-        if (begin_card("##Texte", {0, text_h}, ImGuiWindowFlags_NoScrollbar)) generated_text();
+        if (begin_card("##Text", {0, text_h}, ImGuiWindowFlags_NoScrollbar)) generated_text();
         end_card();
         const float rest = wide ? std::max(em(14), ImGui::GetContentRegionAvail().y) : em(20);
         const float row_w = ImGui::GetContentRegionAvail().x;
@@ -399,7 +398,7 @@ public:
         if (wide) ImGui::EndChild();
     }
     void branches(AppContext& ctx) {
-        card_title("Branches", "Cliquez sur un nœud pour y revenir.");
+        card_title("Branches", "Click a node to jump back to it.");
         if (snapshot_.nodes.empty()) {
             dim_wrapped("The choice tree appears here.");
             return;

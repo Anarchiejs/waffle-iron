@@ -49,24 +49,24 @@ struct ModelInfo {
     std::string file_name;
     uint64_t file_size = 0;
 
-    std::string architecture;                 // general.architecture
-    std::string name;                         // general.name, otherwise the file name without extension
-    std::string file_type;                    // "Q4_K_M", "F16"… (translated general.file_type), "?" if missing
-    uint64_t n_params = 0;                    // sum of tensor elements
-    uint32_t context_length = 0;              // <arch>.context_length
-    uint32_t n_layer = 0;                     // <arch>.block_count
-    uint32_t n_embd = 0;                      // <arch>.embedding_length
-    uint32_t n_head = 0;                      // <arch>.attention.head_count
-    uint32_t n_head_kv = 0;                   // <arch>.attention.head_count_kv (default n_head)
-    uint32_t head_dim_k = 0;                  // <arch>.attention.key_length (default n_embd / n_head)
-    uint32_t head_dim_v = 0;                  // <arch>.attention.value_length (default n_embd / n_head)
-    uint32_t sliding_window = 0;              // <arch>.attention.sliding_window (0 = none)
+    std::string architecture;    // general.architecture
+    std::string name;            // general.name, otherwise the file name without extension
+    std::string file_type;       // "Q4_K_M", "F16"… (translated general.file_type), "?" if missing
+    uint64_t n_params = 0;       // sum of tensor elements
+    uint32_t context_length = 0; // <arch>.context_length
+    uint32_t n_layer = 0;        // <arch>.block_count
+    uint32_t n_embd = 0;         // <arch>.embedding_length
+    uint32_t n_head = 0;         // <arch>.attention.head_count
+    uint32_t n_head_kv = 0;      // <arch>.attention.head_count_kv (default n_head)
+    uint32_t head_dim_k = 0;     // <arch>.attention.key_length (default n_embd / n_head)
+    uint32_t head_dim_v = 0;     // <arch>.attention.value_length (default n_embd / n_head)
+    uint32_t sliding_window = 0; // <arch>.attention.sliding_window (0 = none)
     // One value per layer, 1 = sliding-window attention (<arch>.attention.sliding_window_pattern,
     // array or period); empty if the model has no SWA.
     std::vector<uint8_t> swa_layers;
-    uint32_t head_dim_k_swa = 0;   // <arch>.attention.key_length_swa (default head_dim_k)
-    uint32_t head_dim_v_swa = 0;   // <arch>.attention.value_length_swa (default head_dim_v)
-    uint32_t shared_kv_layers = 0; // <arch>.attention.shared_kv_layers: the last layers reuse the cache
+    uint32_t head_dim_k_swa = 0;              // <arch>.attention.key_length_swa (default head_dim_k)
+    uint32_t head_dim_v_swa = 0;              // <arch>.attention.value_length_swa (default head_dim_v)
+    uint32_t shared_kv_layers = 0;            // <arch>.attention.shared_kv_layers: the last layers reuse the cache
     uint32_t n_expert = 0;                    // <arch>.expert_count (0 = dense)
     uint32_t n_expert_used = 0;               // <arch>.expert_used_count
     std::optional<std::string> chat_template; // tokenizer.chat_template

@@ -39,7 +39,7 @@ struct TempDir {
 
 } // namespace waffle::test
 
-#define WAFFLE_REQUIRE_MODEL(var)                                                                                        \
-    auto var##_opt = ::waffle::test::test_model_path();                                                                  \
-    if (!var##_opt) SKIP("No test model (WAFFLE_TEST_MODEL or tests/data/tiny-llama.gguf)");                             \
+#define WAFFLE_REQUIRE_MODEL(var)                                                                                      \
+    auto var##_opt = ::waffle::test::test_model_path();                                                                \
+    if (!var##_opt) SKIP("No test model (WAFFLE_TEST_MODEL or tests/data/tiny-llama.gguf)");                           \
     const std::filesystem::path var = *var##_opt

@@ -6,9 +6,9 @@
 #include <cmath>
 #include <thread>
 
-using namespace banc;
+using namespace waffle;
 
-TEST_CASE("comparator : deux erreurs indépendantes et annulation", "[comparator]") {
+TEST_CASE("comparator: two independent errors and cancellation", "[comparator]") {
     Engine engine;
     CompareRequest req;
     req.a.label = "A";
@@ -24,8 +24,8 @@ TEST_CASE("comparator : deux erreurs indépendantes et annulation", "[comparator
     CHECK_THROWS_AS(run_compare(engine, nullptr, req, {}, [](float, const auto&) { return false; }), Cancelled);
 }
 
-TEST_CASE("comparator : génération reproductible, perplexité et côté en erreur", "[comparator][model]") {
-    BANC_REQUIRE_MODEL(model);
+TEST_CASE("comparator: reproducible generation, perplexity, and the failing side", "[comparator][model]") {
+    WAFFLE_REQUIRE_MODEL(model);
     Engine engine;
     CompareRequest req;
     req.a.label = "A";
@@ -64,7 +64,7 @@ TEST_CASE("comparator : génération reproductible, perplexité et côté en err
             req.temperature = 0;
         })
         .get();
-    // Le premier côté échoue, le second génère ; vérifier aussi le thread des callbacks et le déchargement.
+    // The first side fails and the second generates; also check the callback thread and unload.
     req.a.load.model_path = "absent-L2.gguf";
     const auto caller = std::this_thread::get_id();
     bool callbacks_on_engine = true;

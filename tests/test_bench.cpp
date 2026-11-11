@@ -10,10 +10,10 @@
 #include <locale>
 #include <set>
 
-using namespace banc;
+using namespace waffle;
 using Catch::Approx;
 
-TEST_CASE("bench : statistiques connues et cas limites", "[bench]") {
+TEST_CASE("bench: known statistics and edge cases", "[bench]") {
     const auto empty = compute_stats({});
     CHECK(empty.n == 0);
     CHECK(empty.mean == 0);
@@ -47,7 +47,7 @@ TEST_CASE("bench : statistiques connues et cas limites", "[bench]") {
     CHECK_THROWS_AS(compute_stats(bad), Error);
 }
 
-TEST_CASE("bench : produit cartésien et valeurs de base", "[bench]") {
+TEST_CASE("bench: Cartesian product and base values", "[bench]") {
     CampaignGrid grid;
     grid.base.load.type_k = "q4_0";
     grid.base.load.type_v = "f16";
@@ -77,7 +77,7 @@ TEST_CASE("bench : produit cartésien et valeurs de base", "[bench]") {
     CHECK(configs[0].load.type_v == "f16");
 }
 
-TEST_CASE("bench : exports stables et échappement", "[bench]") {
+TEST_CASE("bench: stable exports and escaping", "[bench]") {
     BenchConfig cfg;
     cfg.load.n_gpu_layers = 99;
     cfg.load.type_k = cfg.load.type_v = "q8_0";
@@ -89,27 +89,27 @@ TEST_CASE("bench : exports stables et échappement", "[bench]") {
     CHECK(config_label(cfg).find("fa=off") != std::string::npos);
     BenchResult r;
     r.config = cfg;
-    r.model_name = "modèle, \"essai\"|x";
+    r.model_name = "model, \"trial\"|x";
     r.pp.mean = 12.5;
     r.pp.stddev = 1.25;
     r.samples.resize(2);
     const std::vector<BenchResult> results{r, r};
     const auto csv = to_csv(results), md = to_markdown(results);
     CHECK(csv.starts_with("model,model_file_type,n_gpu_layers,n_ctx,type_k,type_v,"));
-    CHECK(csv.find("\"modèle, \"\"essai\"\"|x\"") != std::string::npos);
+    CHECK(csv.find("\"model, \"\"trial\"\"|x\"") != std::string::npos);
     CHECK(csv.find(",12.5,1.25,") != std::string::npos);
     CHECK(std::count(csv.begin(), csv.end(), '\n') == 3);
-    CHECK(md.starts_with("| Modèle | Configuration |"));
+    CHECK(md.starts_with("| Model | Configuration |"));
     CHECK(md.find("\\|x") != std::string::npos);
     CHECK(md.find("12.50 ± 1.25") != std::string::npos);
     CHECK(std::count(md.begin(), md.end(), '\n') == 4);
     const auto empty_csv = to_csv({}), empty_md = to_markdown({});
     CHECK(std::count(empty_csv.begin(), empty_csv.end(), '\n') == 1);
     CHECK(std::count(empty_md.begin(), empty_md.end(), '\n') == 2);
-    r.model_name = "ligne\nsuivante";
-    CHECK(to_csv({r}).find("\"ligne\nsuivante\"") != std::string::npos);
-    CHECK(to_markdown({r}).find("ligne<br>suivante") != std::string::npos);
-    // Un environnement français ne doit jamais introduire une virgule décimale.
+    r.model_name = "next\nline";
+    CHECK(to_csv({r}).find("\"next\nline\"") != std::string::npos);
+    CHECK(to_markdown({r}).find("next<br>line") != std::string::npos);
+    // A comma-decimal locale must not leak into the CSV.
     struct Comma : std::numpunct<char> {
         char do_decimal_point() const override { return ','; }
     };
@@ -122,10 +122,10 @@ TEST_CASE("bench : exports stables et échappement", "[bench]") {
     CHECK(to_csv(results).find(",12.5,1.25,") != std::string::npos);
 }
 
-TEST_CASE("bench : campagne défaillante et annulation sans modèle", "[bench]") {
+TEST_CASE("bench: failed campaign and cancel without a model", "[bench]") {
     Engine engine;
     CampaignGrid grid;
-    grid.base.load.model_path = "modele-absent-L2.gguf";
+    grid.base.load.model_path = "missing-model-L2.gguf";
     grid.n_ctx = {512, 1024};
     std::vector<std::string> errors;
     CHECK(run_campaign(engine, nullptr, grid, {}, &errors).empty());
@@ -133,8 +133,8 @@ TEST_CASE("bench : campagne défaillante et annulation sans modèle", "[bench]")
     CHECK_THROWS_AS(run_campaign(engine, nullptr, grid, [](float, const auto&) { return false; }), Cancelled);
 }
 
-TEST_CASE("bench : mesures réelles et annulation entre répétitions", "[bench][model]") {
-    BANC_REQUIRE_MODEL(model);
+TEST_CASE("bench: real measurements and cancel between repetitions", "[bench][model]") {
+    WAFFLE_REQUIRE_MODEL(model);
     Engine engine;
     BenchConfig cfg;
     cfg.load.model_path = model;
@@ -185,7 +185,7 @@ TEST_CASE("bench : mesures réelles et annulation entre répétitions", "[bench]
                               }),
                     Cancelled);
     CHECK(reached_second);
-    // L'annulation d'une campagne ne doit pas empoisonner le travail suivant.
+    // Cancelling a campaign must not poison the next job.
     CHECK(engine
               .submit([](EngineSession& s) {
                   s.throw_if_stopped();

@@ -6,7 +6,7 @@
 #include <sstream>
 #include <system_error>
 
-namespace banc {
+namespace waffle {
 namespace {
 
 void add_unique(std::vector<std::filesystem::path>& result, const std::filesystem::path& path) {
@@ -17,7 +17,7 @@ void add_unique(std::vector<std::filesystem::path>& result, const std::filesyste
     result.push_back(normal);
 }
 
-// « registry.ollama.ai/library/gemma4/e4b » -> « gemma4:e4b » ; autre espace ou registre gardé en préfixe.
+// "registry.ollama.ai/library/gemma4/e4b" -> "gemma4:e4b"; another namespace or registry is kept as a prefix.
 std::string ollama_tag(const std::filesystem::path& relative) {
     std::vector<std::string> parts;
     for (const auto& part : relative) parts.push_back(part.string());
@@ -37,8 +37,8 @@ std::optional<OllamaBlob> find_ollama_blob(const std::filesystem::path& path) {
     const auto manifests = path.parent_path().parent_path() / "manifests";
     std::error_code ec;
     if (!std::filesystem::is_directory(manifests, ec)) return std::nullopt;
-    // Les manifestes sont du JSON simple : chaque couche est un objet sans objet imbriqué,
-    // avec "mediaType" (…image.model, …image.draft, …image.projector) et "digest" ("sha256:…").
+    // Manifests are simple JSON: each layer is an object with no nested object,
+    // with "mediaType" (…image.model, …image.draft, …image.projector) and "digest" ("sha256:…").
     static const std::regex layer(R"(\{[^{}]*\})");
     static const std::regex media(R"re("mediaType"\s*:\s*"([^"]*)")re");
     static const std::regex sha(R"re("digest"\s*:\s*"sha256:([0-9a-fA-F]+)")re");
@@ -95,4 +95,4 @@ std::vector<std::filesystem::path> default_model_roots() {
     return result;
 }
 
-} // namespace banc
+} // namespace waffle

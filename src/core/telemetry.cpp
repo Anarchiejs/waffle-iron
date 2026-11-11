@@ -12,11 +12,11 @@
 #include <dlfcn.h>
 #endif
 
-namespace banc {
+namespace waffle {
 
 namespace {
 
-// Sous-ensemble de l'API C de NVML (nvml.h), déclaré ici pour ne pas dépendre du CUDA Toolkit au build.
+// Subset of the NVML C API (nvml.h), declared here so the build does not depend on the CUDA Toolkit.
 using nvmlReturn_t = int;
 using nvmlDevice_t = struct nvmlDevice_st*;
 struct nvmlUtilization_t {
@@ -75,7 +75,7 @@ struct Telemetry::Impl {
         lib = dlopen("libnvidia-ml.so.1", RTLD_NOW);
 #endif
         if (!lib) {
-            error = "NVML introuvable (pilote NVIDIA absent ?)";
+            error = "NVML not found (NVIDIA driver missing?)";
             return;
         }
         const bool bound =
@@ -85,15 +85,15 @@ struct Telemetry::Impl {
             bind(api.get_memory, "nvmlDeviceGetMemoryInfo") && bind(api.get_temperature, "nvmlDeviceGetTemperature") &&
             bind(api.get_power, "nvmlDeviceGetPowerUsage") && bind(api.get_clock, "nvmlDeviceGetClockInfo");
         if (!bound) {
-            error = "Version de NVML incompatible (fonction manquante)";
+            error = "Incompatible NVML version (missing function)";
             return;
         }
         if (nvmlReturn_t rc = api.init(); rc != NVML_SUCCESS) {
-            error = std::string("Échec de nvmlInit : ") + api.error_string(rc);
+            error = std::string("nvmlInit failed: ") + api.error_string(rc);
             return;
         }
         if (nvmlReturn_t rc = api.get_handle(0, &device); rc != NVML_SUCCESS) {
-            error = std::string("Aucune carte NVIDIA : ") + api.error_string(rc);
+            error = std::string("No NVIDIA GPU: ") + api.error_string(rc);
             api.shutdown();
             return;
         }
@@ -192,4 +192,4 @@ uint64_t VramPeakWatcher::stop() {
     return impl_->peak.load();
 }
 
-} // namespace banc
+} // namespace waffle

@@ -9,7 +9,7 @@
 #include <functional>
 #include <imgui.h>
 
-namespace banc::ui {
+namespace waffle::ui {
 namespace {
 static std::string visible_piece(const std::string& piece) {
     std::string result;
@@ -27,7 +27,7 @@ static std::string visible_piece(const std::string& piece) {
     }
     return result;
 }
-// Couleur d'un token selon sa probabilité au moment du choix : rouge (rare) vers vert (sûr).
+// Token color from its probability at the moment of the choice: red (rare) toward green (sure).
 ImU32 probability_color(float p) {
     p = std::sqrt(std::clamp(p, 0.f, 1.f));
     return ImGui::ColorConvertFloat4ToU32(ImVec4(1.f - .6f * p, .45f + .5f * p, .5f, 1));
@@ -37,14 +37,14 @@ class SamplerView final : public View {
     LoadParams load_;
     LoadParams active_load_;
     SamplerSettings settings_;
-    char prompt_[8192] = "Décris un paysage au printemps.";
+    char prompt_[8192] = "Describe a landscape in spring.";
     bool chat_ = true, started_ = false, dirty_ = false;
     std::shared_ptr<SamplerLab> lab_ = std::make_shared<SamplerLab>();
     std::future<LabSnapshot> future_;
     LabSnapshot snapshot_;
     bool generating_step_ = false;
     std::chrono::steady_clock::time_point step_time_;
-    // Tout accès au laboratoire est effectué sur le thread du moteur.
+    // Every access to the lab runs on the engine thread.
     void submit(AppContext& ctx, int operation, std::optional<int32_t> token = {}, int node = 0) {
         auto lab = lab_;
         auto settings = settings_;
@@ -76,7 +76,7 @@ class SamplerView final : public View {
         if (n.children.empty()) flags |= ImGuiTreeNodeFlags_Leaf;
         if (n.id == snapshot_.current) flags |= ImGuiTreeNodeFlags_Selected;
         ImGui::PushID(n.id);
-        std::string label = n.parent < 0 ? "Consigne" : visible_piece(n.piece);
+        std::string label = n.parent < 0 ? "Prompt" : visible_piece(n.piece);
         bool expanded = ImGui::TreeNodeEx("branche", flags, "%s", label.c_str());
         if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen() && !future_.valid()) {
             remaining_ = 0;
@@ -89,23 +89,23 @@ class SamplerView final : public View {
         ImGui::PopID();
     }
     void settings_panel(AppContext& ctx) {
-        card_title("Consigne", "Le modèle est chargé au démarrage, puis chaque pas affiche les candidats.");
+        card_title("Prompt", "The model is loaded when you start, then each step shows the candidates.");
         ImGui::BeginDisabled(busy());
-        field_label("Modèle");
-        model_combo("##modele", ctx, model_);
-        field_label("Texte de départ");
-        ImGui::InputTextMultiline("##consigne", prompt_, sizeof(prompt_), ImVec2(-FLT_MIN, em(5.5f)));
-        checkbox("Modèle de conversation", &chat_);
-        help_marker("Applique le gabarit de conversation du modèle autour de la consigne.");
-        if (collapsing("Réglages de chargement")) {
+        field_label("Model");
+        model_combo("##model", ctx, model_);
+        field_label("Starting text");
+        ImGui::InputTextMultiline("##prompt", prompt_, sizeof(prompt_), ImVec2(-FLT_MIN, em(5.5f)));
+        checkbox("Chat template", &chat_);
+        help_marker("Wraps the prompt in the model's chat template.");
+        if (collapsing("Load settings")) {
             const int layers = model_ >= 0 && model_ < static_cast<int>(ctx.library.size())
                                    ? static_cast<int>(ctx.library[static_cast<size_t>(model_)].n_layer)
                                    : 100;
             load_params_editor(load_, layers);
         }
-        if (primary_button(started_ ? "Redémarrer" : "Démarrer", {-FLT_MIN, 0})) {
+        if (primary_button(started_ ? "Restart" : "Start", {-FLT_MIN, 0})) {
             if (model_ < 0 || model_ >= static_cast<int>(ctx.library.size()))
-                ctx.notify("Sélectionnez un modèle", true);
+                ctx.notify("Select a model", true);
             else {
                 active_load_ = load_;
                 active_load_.model_path = ctx.library[static_cast<size_t>(model_)].path;
@@ -118,54 +118,54 @@ class SamplerView final : public View {
         ImGui::EndDisabled();
 
         ImGui::Dummy({0, em(.2f)});
-        section_header("ÉCHANTILLONNAGE");
+        section_header("SAMPLING");
         bool changed = false;
         field_pair(
             [&](float w) {
-                field_label("Température", nullptr, w);
+                field_label("Temperature", nullptr, w);
                 changed |= ImGui::SliderFloat("##temp", &settings_.temperature, 0, 2, "%.2f");
             },
             [&](float w) {
-                field_label("Top-k", "0 = désactivé", w);
+                field_label("Top-k", "0 = off", w);
                 changed |= ImGui::SliderInt("##topk", &settings_.top_k, 0, 200);
             });
         field_pair(
             [&](float w) {
-                field_label("Top-p", "1 = désactivé", w);
+                field_label("Top-p", "1 = off", w);
                 changed |= ImGui::SliderFloat("##topp", &settings_.top_p, 0, 1, "%.2f");
             },
             [&](float w) {
-                field_label("Min-p", "0 = désactivé", w);
+                field_label("Min-p", "0 = off", w);
                 changed |= ImGui::SliderFloat("##minp", &settings_.min_p, 0, 1, "%.2f");
             });
-        section_header("PÉNALITÉS");
+        section_header("PENALTIES");
         field_pair(
             [&](float w) {
-                field_label("Répétition", "1 = désactivée", w);
+                field_label("Repetition", "1 = off", w);
                 changed |= ImGui::SliderFloat("##rep", &settings_.repeat_penalty, .1f, 2, "%.2f");
             },
             [&](float w) {
-                field_label("Fenêtre", "Nombre de derniers tokens pris en compte.", w);
+                field_label("Window", "How many recent tokens are counted.", w);
                 changed |= ImGui::SliderInt("##fen", &settings_.penalty_last_n, 0, 4096);
             });
         field_pair(
             [&](float w) {
-                field_label("Fréquence", nullptr, w);
+                field_label("Frequency", nullptr, w);
                 changed |= ImGui::SliderFloat("##freq", &settings_.frequency_penalty, -2, 2, "%.2f");
             },
             [&](float w) {
-                field_label("Présence", nullptr, w);
+                field_label("Presence", nullptr, w);
                 changed |= ImGui::SliderFloat("##pres", &settings_.presence_penalty, -2, 2, "%.2f");
             });
-        field_label("Graine");
-        changed |= ImGui::InputScalar("##graine", ImGuiDataType_U32, &settings_.seed);
+        field_label("Seed");
+        changed |= ImGui::InputScalar("##seed", ImGuiDataType_U32, &settings_.seed);
         dirty_ |= changed && started_;
     }
     void controls(AppContext& ctx) {
         ImGui::BeginDisabled(!started_ || busy() || snapshot_.at_eog);
-        if (primary_button("Pas suivant")) submit(ctx, 1);
+        if (primary_button("Next step")) submit(ctx, 1);
         ImGui::SameLine();
-        if (ImGui::Button("Générer")) remaining_ = std::clamp(generate_n_, 1, 10000);
+        if (ImGui::Button("Generate")) remaining_ = std::clamp(generate_n_, 1, 10000);
         ImGui::SameLine(0, em(.3f));
         ImGui::SetNextItemWidth(em(4));
         ImGui::InputInt("##N", &generate_n_, 0, 0);
@@ -182,7 +182,7 @@ class SamplerView final : public View {
         ImGui::EndDisabled();
         if (busy()) {
             ImGui::SameLine();
-            const char* label = remaining_ > 0 ? "Génération..." : "Calcul des probabilités...";
+            const char* label = remaining_ > 0 ? "Generating..." : "Computing probabilities...";
             if (ImGui::GetContentRegionAvail().x < em(12)) ImGui::NewLine();
             if (busy_indicator(label)) {
                 remaining_ = 0;
@@ -192,14 +192,14 @@ class SamplerView final : public View {
         } else if (snapshot_.at_eog) {
             ImGui::SameLine();
             ImGui::AlignTextToFramePadding();
-            badge("fin de génération", col::amber);
+            badge("end of generation", col::amber);
         }
     }
     void generated_text() {
-        card_title("Texte généré");
-        // Légende du dégradé de couleur.
+        card_title("Generated text");
+        // Legend for the color gradient.
         {
-            const char* legend = "probabilité :  faible";
+            const char* legend = "probability:  low";
             push_font(nullptr, .85f);
             const float lw = ImGui::CalcTextSize(legend).x + em(5) + ImGui::CalcTextSize("forte").x + em(1);
             const ImVec2 back = ImGui::GetCursorPos();
@@ -220,9 +220,9 @@ class SamplerView final : public View {
             ImGui::SetCursorPos(back);
         }
         if (!started_) {
-            empty_state("Aucune génération",
-                        "Choisissez un modèle, écrivez une consigne puis cliquez sur Démarrer. Chaque pas montre les "
-                        "tokens candidats et leur probabilité.");
+            empty_state("No generation yet",
+                        "Choose a model, write a prompt, then click Start. Each step shows the "
+                        "candidate tokens and their probability.");
             return;
         }
         std::vector<const LabNode*> path;
@@ -235,10 +235,10 @@ class SamplerView final : public View {
             id = it->parent;
         }
         if (path.empty()) {
-            dim_wrapped("La consigne est prête : cliquez sur Pas suivant ou sur un candidat.");
+            dim_wrapped("The prompt is ready: click Next step or a candidate.");
             return;
         }
-        ImGui::BeginChild("texte coloré", ImVec2(0, 0), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+        ImGui::BeginChild("colored text", ImVec2(0, 0), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
         const ImVec2 origin = ImGui::GetCursorScreenPos();
         ImVec2 cursor = origin;
         const float right = origin.x + std::max(1.f, ImGui::GetContentRegionAvail().x - em(.5f));
@@ -276,10 +276,10 @@ class SamplerView final : public View {
         ImGui::EndChild();
     }
     void candidates(AppContext& ctx) {
-        card_title("Candidats", "Barre pâle : probabilité brute. Barre colorée : après échantillonnage. Cliquez pour "
-                                "choisir.");
+        card_title("Candidates", "Pale bar: raw probability. Colored bar: after sampling. Click to "
+                                "choose.");
         if (snapshot_.candidates.empty()) {
-            dim_wrapped(started_ ? "Aucun candidat à ce nœud." : "Les candidats apparaissent après le démarrage.");
+            dim_wrapped(started_ ? "No candidates at this node." : "Candidates appear after you start.");
             return;
         }
         ImGui::BeginDisabled(!started_ || busy() || snapshot_.at_eog);
@@ -291,7 +291,7 @@ class SamplerView final : public View {
             const ImVec2 pos = ImGui::GetCursorScreenPos();
             auto* draw = ImGui::GetWindowDrawList();
             const float r = em(.3f);
-            // Trois colonnes : rang, barre (avec le texte du token), pourcentage.
+            // Three columns: rank, bar (with the token text), percentage.
             const float bar_x = pos.x + em(1.8f), bar_w = std::max(em(4), width - em(1.8f) - em(5.2f));
             draw->AddRectFilled({bar_x, pos.y}, {bar_x + bar_w, pos.y + height},
                                 ImGui::GetColorU32(ImVec4(1, 1, 1, .03f)), r);
@@ -299,7 +299,7 @@ class SamplerView final : public View {
                                 IM_COL32(180, 190, 210, 45), r);
             draw->AddRectFilled({bar_x, pos.y}, {bar_x + bar_w * std::clamp(c.p_final, 0.f, 1.f), pos.y + height},
                                 ImGui::GetColorU32(ImVec4(.34f, .37f, .68f, .9f)), r);
-            ImGui::InvisibleButton("choisir", ImVec2(width, height));
+            ImGui::InvisibleButton("choose", ImVec2(width, height));
             const bool hovered = ImGui::IsItemHovered();
             if (hovered) draw->AddRect(pos, {pos.x + width, pos.y + height}, ImGui::GetColorU32(col::accent), r);
             if (ImGui::IsItemClicked()) submit(ctx, 1, c.token);
@@ -326,14 +326,14 @@ class SamplerView final : public View {
     }
 
 public:
-    const char* title() const override { return "Laboratoire d'échantillonnage"; }
-    const char* nav_title() const override { return "Échantillonnage"; }
+    const char* title() const override { return "Sampler lab"; }
+    const char* nav_title() const override { return "Sampler"; }
     const char* subtitle() const override {
-        return "Avancez token par token : probabilités avant et après échantillonnage, et branches alternatives.";
+        return "Step token by token: probabilities before and after sampling, and alternative branches.";
     }
     const char* icon() const override { return ""; }
     void draw(AppContext& ctx) override {
-        // Suit le modèle choisi dans la bibliothèque.
+        // Follows the model selected in the library.
         if (ctx.selected_model != seen_selection_) {
             seen_selection_ = ctx.selected_model;
             if (!busy() && ctx.selected_model >= 0) model_ = ctx.selected_model;
@@ -366,12 +366,12 @@ public:
         const float gap = em(1);
         const bool wide = avail.x >= em(48);
         if (wide) {
-            if (begin_card("##Réglages", {side_width(.3f, 20, 25), avail.y})) settings_panel(ctx);
+            if (begin_card("##Settings", {side_width(.3f, 20, 25), avail.y})) settings_panel(ctx);
             end_card();
             ImGui::SameLine(0, gap);
             ImGui::BeginChild("##Atelier", {0, avail.y}, ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
         } else {
-            if (begin_card("##Réglages")) settings_panel(ctx);
+            if (begin_card("##Settings")) settings_panel(ctx);
             end_card();
         }
         controls(ctx);
@@ -385,13 +385,13 @@ public:
         const float row_w = ImGui::GetContentRegionAvail().x;
         if (row_w >= em(40)) {
             const float branches_w = std::clamp(row_w * .36f, em(14), em(22));
-            if (begin_card("##Candidats", {row_w - branches_w - gap, rest})) candidates(ctx);
+            if (begin_card("##Candidates", {row_w - branches_w - gap, rest})) candidates(ctx);
             end_card();
             ImGui::SameLine(0, gap);
             if (begin_card("##Branches", {branches_w, rest})) branches(ctx);
             end_card();
         } else {
-            if (begin_card("##Candidats", {0, rest})) candidates(ctx);
+            if (begin_card("##Candidates", {0, rest})) candidates(ctx);
             end_card();
             if (begin_card("##Branches", {0, em(14) - sy})) branches(ctx);
             end_card();
@@ -401,7 +401,7 @@ public:
     void branches(AppContext& ctx) {
         card_title("Branches", "Cliquez sur un nœud pour y revenir.");
         if (snapshot_.nodes.empty()) {
-            dim_wrapped("L'arbre des choix apparaît ici.");
+            dim_wrapped("The choice tree appears here.");
             return;
         }
         for (const auto& n : snapshot_.nodes)
@@ -412,4 +412,4 @@ public:
 std::unique_ptr<View> make_sampler_view() {
     return std::make_unique<SamplerView>();
 }
-} // namespace banc::ui
+} // namespace waffle::ui

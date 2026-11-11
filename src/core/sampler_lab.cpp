@@ -10,7 +10,7 @@
 #include <numeric>
 #include <span>
 
-namespace banc {
+namespace waffle {
 namespace {
 using Sampler = std::unique_ptr<llama_sampler, decltype(&llama_sampler_free)>;
 void validate(const SamplerSettings& s) {
@@ -18,7 +18,7 @@ void validate(const SamplerSettings& s) {
         s.top_p > 1 || !std::isfinite(s.min_p) || s.min_p < 0 || s.min_p > 1 || !std::isfinite(s.repeat_penalty) ||
         s.repeat_penalty <= 0 || !std::isfinite(s.frequency_penalty) || !std::isfinite(s.presence_penalty) ||
         s.penalty_last_n < -1)
-        throw Error("Réglages d'échantillonnage invalides");
+        throw Error("Invalid sampling settings");
 }
 Sampler chain_for(const SamplerSettings& s, int n_vocab, const std::vector<int32_t>& prompt,
                   const std::vector<int32_t>& path, bool draw) {
@@ -43,11 +43,11 @@ std::vector<llama_token_data> token_data(const std::vector<float>& logits) {
     for (size_t i = 0; i < logits.size(); ++i) data.push_back({static_cast<llama_token>(i), logits[i], 0});
     return data;
 }
-// Recalculer explicitement : certains filtres conservent des probabilités antérieures à la température.
+// Recompute explicitly: some filters keep probabilities from before temperature.
 void normalize(llama_token_data_array& data) {
     double maximum = -std::numeric_limits<double>::infinity();
     for (size_t i = 0; i < data.size; ++i) maximum = std::max(maximum, double(data.data[i].logit));
-    if (!std::isfinite(maximum)) throw Error("Aucun logit fini pour l'échantillonnage");
+    if (!std::isfinite(maximum)) throw Error("No finite logit for sampling");
     double sum = 0;
     for (size_t i = 0; i < data.size; ++i) sum += std::exp(double(data.data[i].logit) - maximum);
     for (size_t i = 0; i < data.size; ++i)
@@ -58,14 +58,14 @@ std::vector<float> copy_logits(EngineSession& s) {
     return {logits, logits + s.n_vocab()};
 }
 void require_node(const std::vector<LabNode>& nodes, int id) {
-    if (id < 0 || static_cast<size_t>(id) >= nodes.size()) throw Error("Nœud du laboratoire introuvable");
+    if (id < 0 || static_cast<size_t>(id) >= nodes.size()) throw Error("Lab node not found");
 }
 } // namespace
 
 void SamplerLab::start(EngineSession& session, const std::string& prompt, bool use_chat_template) {
     auto tokens = session.tokenize(use_chat_template ? session.apply_chat_template(prompt) : prompt, true);
     if (tokens.empty() || tokens.size() > session.info().n_ctx)
-        throw Error("La consigne est vide ou dépasse le contexte");
+        throw Error("Prompt is empty or longer than the context");
     nodes_.clear();
     logits_.clear();
     kv_tokens_.clear();
@@ -82,7 +82,7 @@ void SamplerLab::start(EngineSession& session, const std::string& prompt, bool u
 std::vector<Candidate> SamplerLab::candidates(EngineSession& session, const SamplerSettings& settings, int top_n) {
     require_node(nodes_, current_);
     session.throw_if_stopped();
-    if (logits_.size() != static_cast<size_t>(session.n_vocab())) throw Error("Le modèle du laboratoire a changé");
+    if (logits_.size() != static_cast<size_t>(session.n_vocab())) throw Error("Lab model changed");
     auto raw = token_data(logits_);
     llama_token_data_array raw_array{raw.data(), raw.size(), -1, false};
     normalize(raw_array);
@@ -109,10 +109,10 @@ int SamplerLab::step(EngineSession& session, const SamplerSettings& settings, st
     require_node(nodes_, current_);
     session.throw_if_stopped();
     if (current_ != 0 && session.is_eog(nodes_[current_].token))
-        throw Error("Impossible d'avancer après une fin de génération");
-    if (prompt_tokens_.size() + kv_tokens_.size() >= session.info().n_ctx) throw Error("Contexte du laboratoire plein");
-    if (logits_.size() != static_cast<size_t>(session.n_vocab())) throw Error("Le modèle du laboratoire a changé");
-    if (forced && (*forced < 0 || *forced >= session.n_vocab())) throw Error("Token forcé hors du vocabulaire");
+        throw Error("Cannot step past end of generation");
+    if (prompt_tokens_.size() + kv_tokens_.size() >= session.info().n_ctx) throw Error("Lab context is full");
+    if (logits_.size() != static_cast<size_t>(session.n_vocab())) throw Error("Lab model changed");
+    if (forced && (*forced < 0 || *forced >= session.n_vocab())) throw Error("Forced token is outside the vocabulary");
     auto data = token_data(logits_);
     llama_token_data_array distribution{data.data(), data.size(), -1, false};
     auto chain = chain_for(settings, session.n_vocab(), prompt_tokens_, path_tokens(current_), !forced);
@@ -149,9 +149,9 @@ void SamplerLab::go_to(EngineSession& session, int node_id) {
     if (node_id == current_) return;
     auto target = path_tokens(node_id);
     try {
-        // Toujours repartir d'un cache vide : llama_memory_seq_rm rend « succès » sur les caches SWA
-        // (gemma 4) mais laisse des cellules incohérentes, et les logits revisités divergent.
-        // Redécoder consigne + chemin coûte peu et reste exact pour toutes les architectures.
+        // Always start from an empty cache: llama_memory_seq_rm reports success on SWA caches
+        // (gemma 4) but leaves inconsistent cells, and revisited logits diverge.
+        // Redecoding prompt + path is cheap and stays exact for every architecture.
         session.clear_memory();
         session.decode(prompt_tokens_, 0, 0, target.empty());
         if (!target.empty()) session.decode(target, static_cast<int32_t>(prompt_tokens_.size()));
@@ -159,7 +159,7 @@ void SamplerLab::go_to(EngineSession& session, int node_id) {
         kv_tokens_ = std::move(target);
         current_ = node_id;
     } catch (...) {
-        // Une interruption peut laisser un cache partiel ; imposer start avant de le réutiliser.
+        // An interruption can leave a partial cache; require start before reusing it.
         nodes_.clear();
         logits_.clear();
         kv_tokens_.clear();
@@ -192,4 +192,4 @@ std::vector<int32_t> SamplerLab::path_tokens(int node_id) const {
     std::reverse(path.begin(), path.end());
     return path;
 }
-} // namespace banc
+} // namespace waffle

@@ -15,14 +15,14 @@
     {
       "name": "cpu-debug",
       "inherits": "base",
-      "displayName": "CPU, Debug (dev quotidien, tests)",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "BANC_CUDA": "OFF" }
+      "displayName": "CPU, Debug (day-to-day development, tests)",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "WAFFLE_CUDA": "OFF" }
     },
     {
       "name": "cpu-release",
       "inherits": "base",
       "displayName": "CPU, Release (CI)",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "BANC_CUDA": "OFF" }
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "WAFFLE_CUDA": "OFF" }
     },
     {
       "name": "cuda-release",
@@ -30,7 +30,7 @@
       "displayName": "CUDA, Release (RTX 4060 Ti, sm_89)",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "BANC_CUDA": "ON",
+        "WAFFLE_CUDA": "ON",
         "CMAKE_CUDA_ARCHITECTURES": "89"
       }
     },
@@ -38,7 +38,7 @@
       "name": "asan",
       "inherits": "base",
       "displayName": "CPU, Debug + AddressSanitizer",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "BANC_CUDA": "OFF", "BANC_ASAN": "ON" }
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "WAFFLE_CUDA": "OFF", "WAFFLE_ASAN": "ON" }
     }
   ],
   "buildPresets": [

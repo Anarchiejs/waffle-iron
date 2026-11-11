@@ -5,20 +5,20 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
-namespace banc::ui {
+namespace waffle::ui {
 void request_library_scan(View& view);
 namespace {
-// Pictogrammes de navigation dessinés au trait (aucune police d'icônes requise).
+// Navigation marks drawn as strokes (no icon font required).
 void draw_nav_icon(ImDrawList* dl, int page, ImVec2 c, float s, ImU32 color) {
     const float t = std::max(1.0f, s * .11f);
     const float h = s * .5f;
     switch (page) {
-        case 0: // bibliothèque : trois dos de livres
+        case 0: // library: three book spines
             dl->AddRect({c.x - h, c.y - h * .8f}, {c.x - h * .4f, c.y + h}, color, 1.5f, 0, t);
             dl->AddRect({c.x - h * .25f, c.y - h}, {c.x + h * .35f, c.y + h}, color, 1.5f, 0, t);
             dl->AddLine({c.x + h * .55f, c.y - h * .65f}, {c.x + h, c.y + h}, color, t);
             break;
-        case 1: // VRAM : puce et broches
+        case 1: // VRAM: a chip and its pins
             dl->AddRect({c.x - h * .62f, c.y - h * .62f}, {c.x + h * .62f, c.y + h * .62f}, color, 2.0f, 0, t);
             for (int i = -1; i <= 1; i += 2) {
                 const float o = h * .3f * static_cast<float>(i);
@@ -28,23 +28,23 @@ void draw_nav_icon(ImDrawList* dl, int page, ImVec2 c, float s, ImU32 color) {
                 dl->AddLine({c.x + h * .62f, c.y + o}, {c.x + h, c.y + o}, color, t);
             }
             break;
-        case 2: // banc d'essai : histogramme
+        case 2: // bench: a bar chart
             dl->AddRectFilled({c.x - h, c.y + h * .1f}, {c.x - h * .45f, c.y + h}, color, 1.0f);
             dl->AddRectFilled({c.x - h * .27f, c.y - h * .4f}, {c.x + h * .27f, c.y + h}, color, 1.0f);
             dl->AddRectFilled({c.x + h * .45f, c.y - h}, {c.x + h, c.y + h}, color, 1.0f);
             break;
-        case 3: // laboratoire : arbre de branches
+        case 3: // sampler: a branch tree
             dl->AddLine({c.x - h * .55f, c.y}, {c.x + h * .55f, c.y - h * .6f}, color, t);
             dl->AddLine({c.x - h * .55f, c.y}, {c.x + h * .55f, c.y + h * .6f}, color, t);
             dl->AddCircleFilled({c.x - h * .65f, c.y}, h * .3f, color);
             dl->AddCircleFilled({c.x + h * .65f, c.y - h * .65f}, h * .3f, color);
             dl->AddCircleFilled({c.x + h * .65f, c.y + h * .65f}, h * .3f, color);
             break;
-        case 4: // comparateur : A | B
+        case 4: // comparator: A | B
             dl->AddRect({c.x - h, c.y - h * .8f}, {c.x - h * .12f, c.y + h * .8f}, color, 2.0f, 0, t);
             dl->AddRect({c.x + h * .12f, c.y - h * .8f}, {c.x + h, c.y + h * .8f}, color, 2.0f, 0, t);
             break;
-        default: { // moniteur : pouls
+        default: { // monitor: a pulse
             const ImVec2 pts[] = {{c.x - h, c.y},
                                   {c.x - h * .45f, c.y},
                                   {c.x - h * .2f, c.y - h * .8f},
@@ -72,7 +72,7 @@ bool nav_item(int page, const char* label, bool active, bool compact) {
         dl->AddRectFilled(pos, {pos.x + w, pos.y + h}, ImGui::GetColorU32(ImVec4(1, 1, 1, .045f)), em(.45f));
     const ImU32 icon = ImGui::GetColorU32(active ? col::accent : hovered ? col::text : col::dim);
     if (compact) {
-        // Barre étroite : pictogramme seul, libellé en bulle.
+        // Narrow bar: icon only, label in a tooltip.
         draw_nav_icon(dl, page, {pos.x + w * .5f + em(.1f), pos.y + h * .5f}, em(1.05f), icon);
         if (hovered) ImGui::SetTooltip("%s  (Ctrl+%d)", label, page + 1);
         return clicked;
@@ -93,11 +93,11 @@ bool nav_item(int page, const char* label, bool active, bool compact) {
 App::App(bool icons) : store_(Store::default_path()), ctx_{engine_, telemetry_, store_}, icons_(icons) {
     views_ = {make_library_view(), make_vram_view(),    make_bench_view(),
               make_sampler_view(), make_compare_view(), make_monitor_view()};
-    // Page de départ (captures d'écran de développement : BANC_PAGE=0..5).
-    if (const char* page = std::getenv("BANC_PAGE")) page_ = std::clamp(std::atoi(page), 0, 5);
+    // Starting page (development screenshots: WAFFLE_PAGE=0..5).
+    if (const char* page = std::getenv("WAFFLE_PAGE")) page_ = std::clamp(std::atoi(page), 0, 5);
 }
 App::~App() {
-    // Attendre le moteur avant de détruire les vues et leurs références au contexte.
+    // Wait for the engine before destroying the views and their context references.
     engine_.cancel_all();
     engine_.submit([](EngineSession&) {}).wait();
 }
@@ -108,7 +108,7 @@ void App::sidebar(float width, float height, bool compact) {
     ImGui::BeginChild("##Navigation", {width, height}, ImGuiChildFlags_AlwaysUseWindowPadding,
                       ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
     auto* dl = ImGui::GetWindowDrawList();
-    // Marque : pastille « BL » et nom.
+    // Mark: a "WI" badge and the name.
     {
         const ImVec2 pos = ImGui::GetCursorScreenPos();
         const float s = em(2.2f);
@@ -116,20 +116,20 @@ void App::sidebar(float width, float height, bool compact) {
         dl->AddRectFilled(p, {p.x + s, p.y + s}, ImGui::GetColorU32(col::accent_bg), em(.55f));
         dl->AddRect(p, {p.x + s, p.y + s}, ImGui::GetColorU32(ImVec4(.58f, .62f, 1, .55f)), em(.55f), 0, 1.0f);
         const float fs = em(.95f);
-        const ImVec2 tw = fonts().semibold->CalcTextSizeA(fs, FLT_MAX, 0, "BL");
+        const ImVec2 tw = fonts().semibold->CalcTextSizeA(fs, FLT_MAX, 0, "WI");
         dl->AddText(fonts().semibold, fs, {p.x + (s - tw.x) * .5f, p.y + (s - tw.y) * .5f},
-                    ImGui::GetColorU32(col::text), "BL");
+                    ImGui::GetColorU32(col::text), "WI");
         if (compact) {
             ImGui::SetCursorScreenPos(p);
             if (ImGui::InvisibleButton("##marque", {s, s})) about_ = true;
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("À propos de Banc Local");
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("About Waffle Iron");
             ImGui::SetCursorScreenPos(pos);
         }
         if (!compact)
             dl->AddText(fonts().semibold, em(1.1f), {p.x + s + em(.7f), p.y - em(.05f)},
-                        ImGui::GetColorU32(col::text), "Banc Local");
+                        ImGui::GetColorU32(col::text), "Waffle Iron");
         char version[96];
-        std::snprintf(version, sizeof version, "v%s  ·  llama.cpp %s", BANC_VERSION, BANC_LLAMA_VERSION);
+        std::snprintf(version, sizeof version, "v%s  ·  llama.cpp %s", WAFFLE_VERSION, WAFFLE_LLAMA_VERSION);
         const ImVec4 clip{pos.x, pos.y, pos.x + width - em(1), pos.y + s + 4};
         if (!compact)
             dl->AddText(fonts().regular, em(.78f), {p.x + s + em(.7f), p.y + em(1.25f)},
@@ -138,13 +138,13 @@ void App::sidebar(float width, float height, bool compact) {
     }
     if (!compact) {
         ImGui::SetCursorPosX(ImGui::GetCursorPosX() + em(.4f));
-        section_header("OUTILS");
+        section_header("TOOLS");
     }
     ImGui::Dummy({0, em(.05f)});
     for (int i = 0; i < static_cast<int>(views_.size()); ++i)
         if (nav_item(i, views_[static_cast<size_t>(i)]->nav_title(), i == page_, compact)) page_ = i;
     if (compact) {
-        // Jauge de VRAM réduite au pied de la barre.
+        // A small VRAM meter at the foot of the bar.
         if (!ctx_.gpu_history.empty()) {
             const auto& g = ctx_.gpu_history.back();
             const float f = g.vram_total ? static_cast<float>(static_cast<double>(g.vram_used) / g.vram_total) : 0;
@@ -172,7 +172,7 @@ void App::sidebar(float width, float height, bool compact) {
         return;
     }
 
-    // Carte GPU en bas de la barre latérale.
+    // GPU card at the bottom of the sidebar.
     const float card_h = em(7.2f);
     const float bottom = ImGui::GetWindowHeight() - ImGui::GetStyle().WindowPadding.y;
     if (ImGui::GetCursorPosY() + em(1) < bottom - card_h) {
@@ -201,7 +201,7 @@ void App::sidebar(float width, float height, bool compact) {
             ImGui::PopFont();
         } else {
             push_font(nullptr, .84f);
-            dim_wrapped(telemetry_.available() ? "Mesure en cours..." : "NVML indisponible");
+            dim_wrapped(telemetry_.available() ? "Sampling..." : "NVML indisponible");
             ImGui::PopFont();
         }
         ImGui::EndChild();
@@ -210,14 +210,14 @@ void App::sidebar(float width, float height, bool compact) {
         ImGui::SetCursorPosX(ImGui::GetCursorPosX() + em(.4f));
         push_font(nullptr, .86f);
         ImGui::PushStyleColor(ImGuiCol_Text, col::dim);
-        if (ImGui::TextLink("À propos de Banc Local")) about_ = true;
+        if (ImGui::TextLink("About Waffle Iron")) about_ = true;
         ImGui::PopStyleColor();
         ImGui::PopFont();
     }
     ImGui::EndChild();
     ImGui::PopStyleVar(2);
     ImGui::PopStyleColor();
-    // Filet de séparation à droite de la barre.
+    // Separator line on the right of the bar.
     const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
     ImGui::GetWindowDrawList()->AddLine({b.x - 1, a.y}, {b.x - 1, b.y}, ImGui::GetColorU32(col::border));
 }
@@ -225,7 +225,7 @@ void App::status_bar(float height) {
     ImGui::PushStyleColor(ImGuiCol_ChildBg, col::sidebar);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {em(1), 0});
     ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 0);
-    ImGui::BeginChild("##État", {0, height}, ImGuiChildFlags_AlwaysUseWindowPadding,
+    ImGui::BeginChild("##Status", {0, height}, ImGuiChildFlags_AlwaysUseWindowPadding,
                       ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
     auto* dl = ImGui::GetWindowDrawList();
     const ImVec2 wp = ImGui::GetWindowPos();
@@ -239,7 +239,7 @@ void App::status_bar(float height) {
     dl->AddCircleFilled({dot.x + em(.3f), dot.y + ImGui::GetTextLineHeight() * .5f}, em(.24f),
                         ImGui::GetColorU32(idle ? col::good : col::amber));
     ImGui::SetCursorPosX(ImGui::GetCursorPosX() + em(.85f));
-    ImGui::TextUnformatted(status.empty() ? (idle ? "Prêt" : "Travail en cours...") : status.c_str());
+    ImGui::TextUnformatted(status.empty() ? (idle ? "Ready" : "Working...") : status.c_str());
     if (!ctx_.gpu_history.empty()) {
         const auto& g = ctx_.gpu_history.back();
         char right[160];
@@ -313,7 +313,7 @@ void App::frame() {
             } catch (const std::exception& e) {
                 ctx_.notify(e.what(), true);
             } catch (...) {
-                ctx_.notify("Erreur inattendue dans la vue", true);
+                ctx_.notify("Unexpected error in the view", true);
             }
         }
     for (int i = 0; i < static_cast<int>(views_.size()); ++i)
@@ -321,8 +321,8 @@ void App::frame() {
             page_ = i;
     if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_R, ImGuiInputFlags_RouteGlobal) && views_[0])
         request_library_scan(*views_[0]);
-    // Captures d'écran de développement : BANC_SELECT=<indice> présélectionne un modèle de la bibliothèque.
-    if (static const char* select = std::getenv("BANC_SELECT"); select && ctx_.selected_model < 0) {
+    // Development screenshots: WAFFLE_SELECT=<index> preselects a library model.
+    if (static const char* select = std::getenv("WAFFLE_SELECT"); select && ctx_.selected_model < 0) {
         const int index = std::atoi(select);
         if (index >= 0 && index < static_cast<int>(ctx_.library.size())) ctx_.selected_model = index;
     }
@@ -336,19 +336,19 @@ void App::frame() {
     ImGui::SetNextWindowSize(vp->WorkSize);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {0, 0});
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {0, 0});
-    ImGui::Begin("##Banc Local", nullptr,
+    ImGui::Begin("##Waffle Iron", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus |
                      ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollWithMouse);
     ImGui::PopStyleVar(2);
     const float status_h = em(1.95f);
     const float body_h = vp->WorkSize.y - status_h;
-    // Fenêtre étroite : barre latérale réduite aux pictogrammes.
+    // Narrow window: the sidebar shrinks to icons.
     const bool compact = vp->WorkSize.x < em(62);
     const float side_w = compact ? em(4.2f) : std::clamp(vp->WorkSize.x * .17f, em(13.5f), em(16));
     sidebar(side_w, body_h, compact);
     ImGui::SameLine(0, 0);
 
-    // Zone principale : en-tête de page puis contenu.
+    // Main area: page header, then content.
     auto& view = *views_[static_cast<size_t>(page_)];
     ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0, 0, 0, 0));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {em(1.6f), em(1.2f)});
@@ -363,9 +363,9 @@ void App::frame() {
         ImGui::PushStyleColor(ImGuiCol_Text, col::dim);
         ImGui::TextUnformatted(view.subtitle());
         ImGui::PopStyleColor();
-        // Pastille d'état du moteur, alignée à droite du titre.
+        // Engine-state badge, aligned to the right of the title.
         const bool idle = engine_.state() == EngineState::Idle;
-        const char* state = idle ? "Moteur libre" : "Moteur occupé";
+        const char* state = idle ? "Engine idle" : "Engine busy";
         const float bw = ImGui::CalcTextSize(state).x + em(.9f);
         if (ImGui::GetContentRegionAvail().x > bw + em(20)) {
             const ImVec2 keep = ImGui::GetCursorPos();
@@ -384,7 +384,7 @@ void App::frame() {
     } catch (const std::exception& e) {
         ctx_.notify(e.what(), true);
     } catch (...) {
-        ctx_.notify("Erreur inattendue dans la vue", true);
+        ctx_.notify("Unexpected error in the view", true);
     }
     ImGui::EndChild();
     ImGui::EndChild();
@@ -395,33 +395,33 @@ void App::frame() {
     ImGui::End();
 
     if (about_) {
-        ImGui::OpenPopup("À propos");
+        ImGui::OpenPopup("About");
         about_ = false;
     }
     ImGui::SetNextWindowPos(vp->GetCenter(), ImGuiCond_Appearing, {.5f, .5f});
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {em(1.5f), em(1.2f)});
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, em(.7f));
-    if (ImGui::BeginPopupModal("À propos", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar)) {
+    if (ImGui::BeginPopupModal("About", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar)) {
         push_font(fonts().semibold, 1.3f);
-        ImGui::TextUnformatted("Banc Local");
+        ImGui::TextUnformatted("Waffle Iron");
         ImGui::PopFont();
         ImGui::PushStyleColor(ImGuiCol_Text, col::dim);
-        ImGui::Text("Version %s  ·  llama.cpp %s", BANC_VERSION, BANC_LLAMA_VERSION);
+        ImGui::Text("Version %s  ·  llama.cpp %s", WAFFLE_VERSION, WAFFLE_LLAMA_VERSION);
         ImGui::PopStyleColor();
         ImGui::Dummy({0, em(.3f)});
         ImGui::PushTextWrapPos(em(26));
-        ImGui::TextUnformatted("Comprendre, mesurer et régler les modèles locaux sur sa carte graphique.");
+        ImGui::TextUnformatted("Understand, measure, and tune local models on your GPU.");
         ImGui::PopTextWrapPos();
         ImGui::Dummy({0, em(.3f)});
         ImGui::PushStyleColor(ImGuiCol_Text, col::dim);
-        ImGui::TextUnformatted("Raccourcis : Ctrl+1 à Ctrl+6 changent de page, Ctrl+R rescanne les modèles.");
+        ImGui::TextUnformatted("Shortcuts: Ctrl+1 through Ctrl+6 switch pages, Ctrl+R rescans models.");
         ImGui::PopStyleColor();
         ImGui::Dummy({0, em(.4f)});
-        if (primary_button("Fermer", {em(7), 0}) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+        if (primary_button("Close", {em(7), 0}) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
     ImGui::PopStyleVar(2);
 
     toasts({vp->WorkPos.x + vp->WorkSize.x - em(1.2f), vp->WorkPos.y + vp->WorkSize.y - status_h - em(1)});
 }
-} // namespace banc::ui
+} // namespace waffle::ui

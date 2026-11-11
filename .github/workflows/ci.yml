@@ -9,35 +9,35 @@ jobs:
     name: Windows CPU
     runs-on: windows-latest
     steps:
-      - name: Récupérer les sources
+      - name: Check out sources
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Environnement MSVC
+      - name: MSVC environment
         uses: ilammy/msvc-dev-cmd@v1
 
-      - name: vcpkg du runner
+      - name: Runner vcpkg
         shell: pwsh
         run: |
           $root = $env:VCPKG_INSTALLATION_ROOT
           if (-not $root) { $root = $env:VCPKG_ROOT }
           if (-not $root -and (Test-Path 'C:\vcpkg\vcpkg.exe')) { $root = 'C:\vcpkg' }
-          if (-not $root) { throw 'vcpkg introuvable (VCPKG_INSTALLATION_ROOT ou VCPKG_ROOT)' }
+          if (-not $root) { throw 'vcpkg not found (VCPKG_INSTALLATION_ROOT or VCPKG_ROOT)' }
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKG_ROOT=$root"
           Write-Host "VCPKG_ROOT=$root"
 
-      - name: Cache binaire vcpkg
+      - name: vcpkg binary cache
         uses: actions/cache@v4
         with:
           path: vcpkg_installed
           key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
 
-      - name: Configurer
+      - name: Configure
         run: cmake --preset cpu-release
 
-      - name: Compiler
+      - name: Build
         run: cmake --build --preset cpu-release --parallel 4
 
-      - name: Tester
+      - name: Test
         run: ctest --preset cpu-release

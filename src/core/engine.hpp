@@ -1,6 +1,6 @@
-// Le moteur : le SEUL thread qui parle à llama.cpp.
-// L'interface et la CLI lui soumettent des travaux (fonctions qui reçoivent EngineSession&)
-// et récupèrent le résultat par std::future. Un modèle chargé reste chargé entre deux travaux.
+// The engine: the ONLY thread that talks to llama.cpp.
+// The UI and the CLI submit jobs (functions that receive EngineSession&)
+// and get the result through std::future. A loaded model stays loaded between jobs.
 #pragma once
 
 #include "core/types.hpp"
@@ -24,7 +24,7 @@ struct llama_context;
 struct llama_vocab;
 typedef int32_t llama_token;
 
-namespace banc {
+namespace waffle {
 
 struct LoadedModel {
     LoadParams params;
@@ -34,28 +34,28 @@ struct LoadedModel {
     int n_layer = 0;
     int n_ctx_train = 0;
     int n_vocab = 0;
-    uint32_t n_ctx = 0; // contexte réellement alloué
+    uint32_t n_ctx = 0; // context actually allocated
     double load_ms = 0;
     bool has_chat_template = false;
 };
 
 struct DeviceMemory {
-    std::string name; // "" si aucun GPU
+    std::string name; // "" if no GPU
     uint64_t free = 0;
     uint64_t total = 0;
 };
 
-// Accès à llama.cpp. N'existe que sur le thread du moteur : ne jamais garder de référence
-// ni de pointeur llama_* hors d'un travail.
+// Access to llama.cpp. Exists only on the engine thread: never keep a reference
+// or a llama_* pointer outside a job.
 class EngineSession {
 public:
     ~EngineSession();
 
     bool loaded() const { return model_ != nullptr; }
-    const LoadedModel& info() const; // lève Error si aucun modèle
+    const LoadedModel& info() const; // throws Error if no model is loaded
 
-    // Charge (en déchargeant l'éventuel modèle précédent). Ne recharge pas si params identiques.
-    // Lève Error avec un message clair (fichier absent, mémoire insuffisante…) ou Cancelled.
+    // Loads (unloading any previous model). Does not reload when params are identical.
+    // Throws Error with a clear message (missing file, insufficient memory…) or Cancelled.
     const LoadedModel& load(const LoadParams& params, const ProgressFn& progress = {});
     void unload();
 
@@ -67,18 +67,18 @@ public:
     std::vector<llama_token> tokenize(std::string_view text, bool add_special, bool parse_special = true) const;
     std::string token_to_piece(llama_token token, bool special = true) const;
     bool is_eog(llama_token token) const;
-    // Met une consigne utilisateur au format de conversation du modèle ; texte brut s'il n'a pas de modèle.
+    // Formats a user prompt with the model's chat template; raw text if it has no template.
     std::string apply_chat_template(std::string_view user_message) const;
 
-    // Vide le cache KV de toutes les séquences.
+    // Clears the KV cache of every sequence.
     void clear_memory();
-    // Décode des tokens à partir de la position `pos` dans la séquence `seq`, par paquets de n_batch.
-    // Seul le dernier token produit des logits si want_last_logits. Lève Error / Cancelled.
+    // Decodes tokens starting at position `pos` in sequence `seq`, in batches of n_batch.
+    // Only the last token produces logits when want_last_logits. Throws Error / Cancelled.
     void decode(std::span<const llama_token> tokens, int32_t pos, int32_t seq = 0, bool want_last_logits = true);
-    // Logits du dernier token décodé (n_vocab valeurs).
+    // Logits of the last decoded token (n_vocab values).
     const float* last_logits() const;
 
-    // Annulation du travail courant (vérifiée aussi pendant llama_decode via abort_callback).
+    // Cancellation of the current job (also checked during llama_decode via abort_callback).
     bool stop_requested() const { return stop_.stop_requested(); }
     void throw_if_stopped() const;
 
@@ -101,16 +101,16 @@ enum class EngineState { Idle, Busy };
 
 class Engine {
 public:
-    Engine();  // initialise le backend llama.cpp et démarre le thread
-    ~Engine(); // annule tout et attend la fin du thread
+    Engine();  // initializes the llama.cpp backend and starts the thread
+    ~Engine(); // cancels everything and waits for the thread to finish
     Engine(const Engine&) = delete;
     Engine& operator=(const Engine&) = delete;
 
-    // Soumet un travail ; le futur porte sa valeur ou son exception (Error, Cancelled…).
+    // Submits a job; the future carries its value or its exception (Error, Cancelled…).
     template <class F> auto submit(F&& fn) -> std::future<std::invoke_result_t<F&, EngineSession&>> {
         using R = std::invoke_result_t<F&, EngineSession&>;
-        // Un travail annulé avant de démarrer s'exécute quand même, mais lève Cancelled d'emblée :
-        // son futur reçoit donc toujours une valeur ou une exception.
+        // A job cancelled before it starts still runs, but throws Cancelled immediately:
+        // its future therefore always receives a value or an exception.
         auto task = std::make_shared<std::packaged_task<R(EngineSession&)>>(
             [f = std::forward<F>(fn)](EngineSession& s) mutable -> R {
                 s.throw_if_stopped();
@@ -121,16 +121,16 @@ public:
         return fut;
     }
 
-    // Annule le travail en cours et vide la file (les futurs en attente reçoivent Cancelled).
+    // Cancels the current job and clears the queue (waiting futures receive Cancelled).
     void cancel_all();
     EngineState state() const;
     size_t pending() const;
-    // Libellé du travail en cours fourni par set_status depuis un travail ("" au repos).
+    // Label of the current job, set by set_status from a job ("" when idle).
     std::string status() const;
-    // À appeler depuis un travail pour afficher où il en est.
+    // Call from a job to show how far it has got.
     void set_status(std::string text);
 
-    // Journaux de llama.cpp et du moteur (niveau ggml : 2 info, 3 warn, 4 error). Thread-safe.
+    // llama.cpp and engine logs (ggml level: 2 info, 3 warn, 4 error). Thread-safe.
     void set_log_sink(std::function<void(int level, std::string_view text)> sink);
 
 private:
@@ -148,10 +148,10 @@ private:
     std::shared_ptr<Queued> current_;
     std::string status_;
     std::unique_ptr<EngineSession> session_;
-    std::jthread thread_; // déclaré en dernier : démarre après le reste
+    std::jthread thread_; // declared last: starts after the rest
 };
 
-// Nom ggml -> enum ggml_type (pour type_k / type_v). Lève Error si inconnu.
+// ggml name -> ggml_type enum (for type_k / type_v). Throws Error if unknown.
 int ggml_type_from_name(std::string_view name);
 
-} // namespace banc
+} // namespace waffle

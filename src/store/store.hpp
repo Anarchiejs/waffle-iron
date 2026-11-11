@@ -1,5 +1,5 @@
-// Stockage SQLite : bibliothèque de modèles (étiquettes, notes), campagnes de mesure, vérifications VRAM.
-// Thread-safe (un mutex interne) ; schéma versionné par PRAGMA user_version avec migrations.
+// SQLite storage: model library (tags, notes), benchmark campaigns, VRAM checks.
+// Thread-safe (an internal mutex); schema versioned by PRAGMA user_version with migrations.
 #pragma once
 
 #include "core/types.hpp"
@@ -13,10 +13,10 @@
 
 struct sqlite3;
 
-namespace banc {
+namespace waffle {
 
 struct ModelRecord {
-    std::string path; // clé
+    std::string path; // key
     std::string file_name;
     std::string name;
     std::string architecture;
@@ -35,10 +35,10 @@ struct CampaignRecord {
     std::string name;
     std::string created_at; // ISO 8601
     int n_results = 0;
-    std::string model_names; // noms distincts séparés par ", "
+    std::string model_names; // distinct names separated by ", "
 };
 
-// Un point d'historique : une configuration donnée d'un modèle mesurée à une date.
+// One history point: a given configuration of a model measured on a date.
 struct HistoryPoint {
     std::string timestamp;
     std::string llama_version;
@@ -57,31 +57,31 @@ struct VramCheck {
 
 class Store {
 public:
-    // Ouvre ou crée la base ; lève Error si impossible.
+    // Opens or creates the database; throws Error on failure.
     explicit Store(const std::filesystem::path& db_path);
     ~Store();
     Store(const Store&) = delete;
     Store& operator=(const Store&) = delete;
 
-    // %LOCALAPPDATA%\BancLocal\banc.db (dossier créé si besoin).
+    // %LOCALAPPDATA%\WaffleIron\waffle.db (directory created if needed).
     static std::filesystem::path default_path();
 
-    // --- Bibliothèque
-    void upsert_model(const ModelInfo& info); // garde tags et notes existants
+    // --- Library
+    void upsert_model(const ModelInfo& info); // keeps existing tags and notes
     std::vector<ModelRecord> list_models() const;
     std::optional<ModelRecord> find_model(const std::string& path) const;
     void set_model_tags(const std::string& path, const std::vector<std::string>& tags);
     void set_model_notes(const std::string& path, const std::string& notes);
-    void remove_missing_models(); // supprime les fiches dont le fichier n'existe plus
+    void remove_missing_models(); // deletes records whose file no longer exists
 
-    // --- Banc d'essai
+    // --- Benchmark
     int64_t save_campaign(const std::string& name, const std::vector<BenchResult>& results);
     std::vector<CampaignRecord> list_campaigns() const;
-    std::vector<BenchResult> load_campaign(int64_t id) const; // samples compris
+    std::vector<BenchResult> load_campaign(int64_t id) const; // including samples
     void delete_campaign(int64_t id);
-    std::vector<HistoryPoint> history(const std::string& model_path) const; // tri par date croissante
+    std::vector<HistoryPoint> history(const std::string& model_path) const; // sorted by ascending date
 
-    // --- Planificateur de VRAM
+    // --- VRAM planner
     void save_vram_check(const VramCheck& check);
     std::vector<VramCheck> vram_checks(const std::string& model_path) const;
 
@@ -90,4 +90,4 @@ private:
     sqlite3* db_ = nullptr;
 };
 
-} // namespace banc
+} // namespace waffle

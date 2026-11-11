@@ -28,21 +28,21 @@ ID3D11RenderTargetView* target = nullptr;
 UINT resize_width = 0, resize_height = 0;
 bool shot_requested = false;
 std::string shot_path;
-// Scénario de test (développement) : BANC_SCRIPT=<fichier>, une commande par ligne, jouée image par image en
-// injectant les évènements directement dans ImGui (indépendant du curseur réel) :
+// Test script (development): WAFFLE_SCRIPT=<file>, one command per line, played frame by frame by
+// injecting events straight into ImGui (independent of the real cursor):
 //   wait <images> | click <x> <y> | move <x> <y> | scroll <x> <y> <crans> | type <texte> | key enter|backspace|ctrl+a
-//   shot <fichier.bmp> | quit
+//   shot <file.bmp> | quit
 struct Script {
     std::vector<std::string> lines;
     size_t next = 0;
     int wait = 0;
     ImVec2 mouse{-FLT_MAX, -FLT_MAX};
     bool done = false;
-    // Suite d'évènements élémentaires différés (un par image) pour qu'ImGui voie chaque transition.
+    // A queue of elementary events deferred one per frame so ImGui sees each transition.
     std::vector<std::function<void(ImGuiIO&)>> pending;
 };
 std::unique_ptr<Script> load_script() {
-    const char* path = std::getenv("BANC_SCRIPT");
+    const char* path = std::getenv("WAFFLE_SCRIPT");
     if (!path) return nullptr;
     std::ifstream in(path);
     auto script = std::make_unique<Script>();
@@ -51,7 +51,7 @@ std::unique_ptr<Script> load_script() {
     return script;
 }
 void step_script(Script& sc, ImGuiIO& io) {
-    // La position simulée est réaffirmée à chaque image (le moteur Win32 peut injecter le curseur réel).
+    // The simulated position is restated every frame (the Win32 backend can inject the real cursor).
     if (sc.mouse.x > -FLT_MAX) io.AddMousePosEvent(sc.mouse.x, sc.mouse.y);
     if (!sc.pending.empty()) {
         sc.pending.front()(io);
@@ -160,8 +160,8 @@ LRESULT WINAPI window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
 } // namespace
-// Mode capture (développement) : BANC_CAPTURE=<fichier.bmp> enregistre l'image rendue puis quitte.
-// BANC_CAPTURE_SIZE=LxH fixe la taille de la zone cliente, BANC_CAPTURE_FRAMES le nombre d'images avant capture.
+// Capture mode (development): WAFFLE_CAPTURE=<file.bmp> saves the rendered image, then quits.
+// WAFFLE_CAPTURE_SIZE=WxH sets the client size, WAFFLE_CAPTURE_FRAMES the frames before the capture.
 bool save_backbuffer_bmp(const char* path) {
     ID3D11Texture2D* buffer = nullptr;
     if (FAILED(swap_chain->GetBuffer(0, IID_PPV_ARGS(&buffer)))) return false;
@@ -214,10 +214,10 @@ bool save_backbuffer_bmp(const char* path) {
     return ok;
 }
 int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int show) {
-    const char* capture_path = std::getenv("BANC_CAPTURE");
+    const char* capture_path = std::getenv("WAFFLE_CAPTURE");
     int capture_w = 0, capture_h = 0, capture_frames = 90;
-    if (const char* size = std::getenv("BANC_CAPTURE_SIZE")) std::sscanf(size, "%dx%d", &capture_w, &capture_h);
-    if (const char* frames = std::getenv("BANC_CAPTURE_FRAMES")) capture_frames = std::atoi(frames);
+    if (const char* size = std::getenv("WAFFLE_CAPTURE_SIZE")) std::sscanf(size, "%dx%d", &capture_w, &capture_h);
+    if (const char* frames = std::getenv("WAFFLE_CAPTURE_FRAMES")) capture_frames = std::atoi(frames);
     ImGui_ImplWin32_EnableDpiAwareness();
     WNDCLASSEXW wc{sizeof(WNDCLASSEXW),
                    CS_CLASSDC,
@@ -229,12 +229,12 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int show) {
                    LoadCursorW(nullptr, MAKEINTRESOURCEW(32512)),
                    nullptr,
                    nullptr,
-                   L"BancLocal",
+                   L"WaffleIron",
                    nullptr};
     if (!RegisterClassExW(&wc)) return 1;
     const float dpi = ImGui_ImplWin32_GetDpiScaleForMonitor(MonitorFromPoint({0, 0}, MONITOR_DEFAULTTOPRIMARY));
     HWND hwnd =
-        CreateWindowW(wc.lpszClassName, L"Banc Local", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
+        CreateWindowW(wc.lpszClassName, L"Waffle Iron", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
                       static_cast<int>(1400 * dpi), static_cast<int>(900 * dpi), nullptr, nullptr, instance, nullptr);
     if (!hwnd) {
         UnregisterClassW(wc.lpszClassName, instance);
@@ -260,7 +260,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int show) {
         hr = D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, nullptr, 0, D3D11_SDK_VERSION,
                                            &sd, &swap_chain, &device, &level, &context);
     if (FAILED(hr) || !create_target()) {
-        MessageBoxW(hwnd, L"Impossible d'initialiser DirectX 11.", L"Banc Local", MB_ICONERROR);
+        MessageBoxW(hwnd, L"Cannot initialize DirectX 11.", L"Waffle Iron", MB_ICONERROR);
         cleanup();
         DestroyWindow(hwnd);
         UnregisterClassW(wc.lpszClassName, instance);
@@ -276,7 +276,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int show) {
     const auto directory = std::filesystem::path(exe).parent_path();
     std::string ini = (directory / "imgui.ini").string();
     io.IniFilename = ini.c_str();
-    const bool icons = banc::ui::apply_theme(dpi, directory / "assets");
+    const bool icons = waffle::ui::apply_theme(dpi, directory / "assets");
     bool win32_ok = ImGui_ImplWin32_Init(hwnd);
     bool dx_ok = win32_ok && ImGui_ImplDX11_Init(device, context);
     int result = 0;
@@ -284,7 +284,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int show) {
         ShowWindow(hwnd, show);
         UpdateWindow(hwnd);
         try {
-            banc::ui::App app(icons);
+            waffle::ui::App app(icons);
             auto script = load_script();
             bool done = false;
             float current_dpi = dpi;
@@ -305,7 +305,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int show) {
                     hr = swap_chain->ResizeBuffers(0, resize_width, resize_height, DXGI_FORMAT_UNKNOWN, 0);
                     resize_width = resize_height = 0;
                     if (FAILED(hr) || !create_target())
-                        throw std::runtime_error("Redimensionnement DirectX impossible");
+                        throw std::runtime_error("Cannot resize DirectX");
                 }
                 const float next_dpi = ImGui_ImplWin32_GetDpiScaleForHwnd(hwnd);
                 if (next_dpi > 0 && next_dpi != current_dpi) {
@@ -336,14 +336,14 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int show) {
                 if (hr == DXGI_STATUS_OCCLUDED)
                     Sleep(10);
                 else if (FAILED(hr))
-                    throw std::runtime_error("Le périphérique DirectX a été perdu");
+                    throw std::runtime_error("The DirectX device was lost");
             }
         } catch (const std::exception& e) {
-            MessageBoxA(hwnd, e.what(), "Banc Local", MB_ICONERROR);
+            MessageBoxA(hwnd, e.what(), "Waffle Iron", MB_ICONERROR);
             result = 1;
         }
     } else {
-        MessageBoxW(hwnd, L"Initialisation ImGui impossible.", L"Banc Local", MB_ICONERROR);
+        MessageBoxW(hwnd, L"Cannot initialize ImGui.", L"Waffle Iron", MB_ICONERROR);
         result = 1;
     }
     if (dx_ok) ImGui_ImplDX11_Shutdown();

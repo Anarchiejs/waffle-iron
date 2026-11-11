@@ -12,7 +12,7 @@
 #include <set>
 #include <sstream>
 
-namespace banc {
+namespace waffle {
 namespace {
 template <class T> std::string number(const void* data, size_t i) {
     T value;
@@ -87,13 +87,13 @@ std::string ftype_name(uint32_t type) {
 
 ModelInfo read_gguf(const std::filesystem::path& path, bool with_tensors) {
     try {
-        if (!is_gguf_file(path)) throw Error("Signature GGUF absente : " + path.string());
+        if (!is_gguf_file(path)) throw Error("Missing GGUF signature: " + path.string());
         ggml_context* raw = nullptr;
         const auto utf8 = path.u8string();
         std::unique_ptr<gguf_context, decltype(&gguf_free)> ctx(
             gguf_init_from_file(reinterpret_cast<const char*>(utf8.c_str()), {true, &raw}), gguf_free);
         std::unique_ptr<ggml_context, decltype(&ggml_free)> tensors(raw, ggml_free);
-        if (!ctx || !tensors) throw Error("En-tête GGUF illisible : " + path.string());
+        if (!ctx || !tensors) throw Error("Unreadable GGUF header: " + path.string());
         ModelInfo model;
         model.path = path;
         model.file_name = path.filename().string();
@@ -116,7 +116,7 @@ ModelInfo read_gguf(const std::filesystem::path& path, bool with_tensors) {
         model.head_dim_v_swa = integer(ctx.get(), prefix + "attention.value_length_swa", model.head_dim_v);
         model.shared_kv_layers = integer(ctx.get(), prefix + "attention.shared_kv_layers");
         if (model.sliding_window) {
-            // Comme llama.cpp : tableau par couche, ou période p (couche SWA si il % p < p - 1 ; 0 = toutes).
+            // As in llama.cpp: per-layer array, or period p (SWA layer if il % p < p - 1; 0 = all).
             const auto key = prefix + "attention.sliding_window_pattern";
             const auto id = gguf_find_key(ctx.get(), key.c_str());
             model.swa_layers.assign(model.n_layer, 1);
@@ -177,7 +177,7 @@ ModelInfo read_gguf(const std::filesystem::path& path, bool with_tensors) {
     } catch (const Error&) {
         throw;
     } catch (const std::exception& e) {
-        throw Error("Lecture GGUF impossible : " + path.string() + " : " + e.what());
+        throw Error("Cannot read GGUF: " + path.string() + ": " + e.what());
     }
 }
 
@@ -208,4 +208,4 @@ std::vector<std::filesystem::path> scan_model_dirs(const std::vector<std::filesy
     }
     return {result.begin(), result.end()};
 }
-} // namespace banc
+} // namespace waffle

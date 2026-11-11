@@ -8,9 +8,9 @@
 #include <fstream>
 #include <thread>
 
-using namespace banc;
+using namespace waffle;
 
-TEST_CASE("Engine : les travaux s'exécutent dans l'ordre sur un seul thread", "[engine]") {
+TEST_CASE("Engine: jobs run in order on a single thread", "[engine]") {
     Engine engine;
     std::thread::id first_thread;
     auto f1 = engine.submit([&](EngineSession&) {
@@ -23,13 +23,13 @@ TEST_CASE("Engine : les travaux s'exécutent dans l'ordre sur un seul thread", "
     REQUIRE(first_thread != std::this_thread::get_id());
 }
 
-TEST_CASE("Engine : une exception arrive dans le futur", "[engine]") {
+TEST_CASE("Engine: an exception arrives in the future", "[engine]") {
     Engine engine;
-    auto f = engine.submit([](EngineSession&) -> int { throw Error("boum"); });
+    auto f = engine.submit([](EngineSession&) -> int { throw Error("boom"); });
     REQUIRE_THROWS_AS(f.get(), Error);
 }
 
-TEST_CASE("Engine : cancel_all annule le travail courant et la file", "[engine]") {
+TEST_CASE("Engine: cancel_all cancels the running job and the queue", "[engine]") {
     Engine engine;
     std::atomic<bool> started{false};
     auto running = engine.submit([&](EngineSession& s) {
@@ -45,27 +45,27 @@ TEST_CASE("Engine : cancel_all annule le travail courant et la file", "[engine]"
     engine.cancel_all();
     REQUIRE_THROWS_AS(running.get(), Cancelled);
     REQUIRE_THROWS_AS(queued.get(), Cancelled);
-    // Le moteur reste utilisable après une annulation.
+    // The engine stays usable after a cancellation.
     REQUIRE(engine.submit([](EngineSession&) { return 7; }).get() == 7);
 }
 
-TEST_CASE("Engine : erreurs claires sans modèle", "[engine]") {
+TEST_CASE("Engine: clear errors without a model", "[engine]") {
     Engine engine;
     auto f = engine.submit([](EngineSession& s) {
         LoadParams p;
-        p.model_path = "C:/n_existe_pas/modele.gguf";
+        p.model_path = "C:/does_not_exist/model.gguf";
         s.load(p);
     });
-    REQUIRE_THROWS_WITH(f.get(), Catch::Matchers::ContainsSubstring("introuvable"));
+    REQUIRE_THROWS_WITH(f.get(), Catch::Matchers::ContainsSubstring("not found"));
     auto g = engine.submit([](EngineSession& s) { return s.tokenize("x", true); });
     REQUIRE_THROWS_AS(g.get(), Error);
 }
 
-TEST_CASE("Engine : fichier non GGUF -> Error, pas de plantage", "[engine]") {
+TEST_CASE("Engine: non-GGUF file -> Error, no crash", "[engine]") {
     test::TempDir dir("engine_bad");
-    auto bad = dir.path / "faux.gguf";
+    auto bad = dir.path / "fake.gguf";
     {
-        std::ofstream(bad) << "ceci n'est pas un modèle";
+        std::ofstream(bad) << "this is not a model";
     }
     Engine engine;
     auto f = engine.submit([&](EngineSession& s) {
@@ -77,13 +77,13 @@ TEST_CASE("Engine : fichier non GGUF -> Error, pas de plantage", "[engine]") {
     REQUIRE_THROWS_AS(f.get(), Error);
 }
 
-TEST_CASE("Engine : chargement, tokenisation, décodage", "[engine][model]") {
-    BANC_REQUIRE_MODEL(model);
+TEST_CASE("Engine: load, tokenize, decode", "[engine][model]") {
+    WAFFLE_REQUIRE_MODEL(model);
     Engine engine;
     LoadParams p;
     p.model_path = model;
     p.n_ctx = 512;
-    p.n_batch = 64; // force plusieurs paquets dans decode
+    p.n_batch = 64; // force several batches inside decode
     p.n_ubatch = 64;
 
     auto info = engine.submit([&](EngineSession& s) { return s.load(p); }).get();
@@ -91,14 +91,14 @@ TEST_CASE("Engine : chargement, tokenisation, décodage", "[engine][model]") {
     REQUIRE(info.n_ctx >= 512);
     REQUIRE(info.load_ms > 0);
 
-    // Recharger avec les mêmes paramètres ne recharge pas.
+    // Reloading with the same parameters does not reload.
     auto again = engine.submit([&](EngineSession& s) { return s.load(p).load_ms; }).get();
     REQUIRE(again == info.load_ms);
 
     auto argmax = engine
                       .submit([&](EngineSession& s) {
                           std::string text;
-                          for (int i = 0; i < 20; ++i) text += "Le banc d'essai mesure la vitesse. ";
+                          for (int i = 0; i < 20; ++i) text += "The bench measures how fast generation runs. ";
                           auto tokens = s.tokenize(text, true);
                           REQUIRE(tokens.size() > 64);
                           if (tokens.size() > 200) tokens.resize(200);
@@ -115,7 +115,7 @@ TEST_CASE("Engine : chargement, tokenisation, décodage", "[engine][model]") {
                       .get();
     REQUIRE(argmax >= 0);
 
-    // Contexte plein -> Error explicite.
+    // Full context -> explicit Error.
     auto overflow = engine.submit([&](EngineSession& s) {
         std::vector<llama_token> many(600, 1);
         s.clear_memory();

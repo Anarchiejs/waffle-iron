@@ -6,18 +6,18 @@
 #include <limits>
 #include <sstream>
 
-namespace banc {
+namespace waffle {
 namespace {
-// Hypothèses initiales à calibrer sur les mesures CUDA réelles.
+// Initial assumptions to calibrate against real CUDA measurements.
 constexpr uint64_t cuda_overhead = 256 * MiB;
 constexpr uint64_t activation_vectors = 4;
 constexpr uint64_t float_bytes = 4;
 uint64_t add(uint64_t a, uint64_t b) {
-    if (b > UINT64_MAX - a) throw Error("Estimation mémoire trop grande");
+    if (b > UINT64_MAX - a) throw Error("Memory estimate is too large");
     return a + b;
 }
 uint64_t mul(uint64_t a, uint64_t b) {
-    if (a && b > UINT64_MAX / a) throw Error("Estimation mémoire trop grande");
+    if (a && b > UINT64_MAX / a) throw Error("Memory estimate is too large");
     return a * b;
 }
 ggml_type find_type(std::string_view name) {
@@ -26,14 +26,14 @@ ggml_type find_type(std::string_view name) {
         const auto* text = ggml_type_name(type);
         if (text && name == text && ggml_blck_size(type) > 0 && ggml_type_size(type) > 0) return type;
     }
-    throw Error("Type ggml inconnu : " + std::string(name));
+    throw Error("Unknown ggml type: " + std::string(name));
 }
 } // namespace
 
 uint64_t ggml_type_bytes(std::string_view name, uint64_t n) {
     const auto type = find_type(name);
     const auto block = static_cast<uint64_t>(ggml_blck_size(type));
-    // Un bloc incomplet occupe un bloc entier ; évite les assertions de ggml_row_size.
+    // An incomplete block occupies a whole block; avoids ggml_row_size assertions.
     return mul(n / block + (n % block != 0), ggml_type_size(type));
 }
 
@@ -45,12 +45,12 @@ const std::vector<std::string>& kv_cache_types() {
 VramEstimate estimate_vram(const ModelInfo& model, const VramPlanInput& input) {
     for (const auto* type : {&input.type_k, &input.type_v}) {
         if (std::find(kv_cache_types().begin(), kv_cache_types().end(), *type) == kv_cache_types().end())
-            throw Error("Type de cache KV non pris en charge : " + *type);
+            throw Error("Unsupported KV cache type: " + *type);
     }
-    if (input.n_gpu_layers < -1) throw Error("Nombre de couches GPU invalide");
+    if (input.n_gpu_layers < -1) throw Error("Invalid GPU layer count");
     if (!input.n_ctx || !input.n_ubatch || !input.n_batch || !input.n_seq)
-        throw Error("Les tailles du contexte, des lots et des séquences doivent être positives");
-    if (model.tensors.empty() && model.n_params) throw Error("Relire le modèle avec ses tenseurs pour estimer la VRAM");
+        throw Error("Context, batch, and sequence sizes must be positive");
+    if (model.tensors.empty() && model.n_params) throw Error("Reread the model with its tensors to estimate VRAM");
     const uint32_t gpu_layers =
         input.n_gpu_layers == -1 ? model.n_layer : std::min(model.n_layer, static_cast<uint32_t>(input.n_gpu_layers));
     const bool output_gpu = input.n_gpu_layers == -1 || static_cast<uint64_t>(input.n_gpu_layers) > model.n_layer;
@@ -67,7 +67,7 @@ VramEstimate estimate_vram(const ModelInfo& model, const VramPlanInput& input) {
         if (tensor.name == "token_embd.weight" && tensor.shape.size() >= 2)
             vocab = static_cast<uint64_t>(tensor.shape[1]);
     }
-    // Sortie liée (pas d'output.weight) : llama.cpp duplique token_embd sur le GPU pour la projection finale.
+    // Tied output (no output.weight): llama.cpp duplicates token_embd onto the GPU for the final projection.
     const auto has_output = std::any_of(model.tensors.begin(), model.tensors.end(),
                                         [](const TensorInfo& t) { return t.name == "output.weight"; });
     if (output_gpu && !has_output) {
@@ -75,17 +75,17 @@ VramEstimate estimate_vram(const ModelInfo& model, const VramPlanInput& input) {
                                        [](const TensorInfo& t) { return t.name == "token_embd.weight"; });
         if (embd != model.tensors.end()) {
             result.weights_gpu = add(result.weights_gpu, embd->n_bytes);
-            result.notes.push_back("Sortie liée aux embeddings : token_embd est aussi copié sur le GPU");
+            result.notes.push_back("Tied embeddings: token_embd is also copied to the GPU");
         }
     }
-    // Le résumé des tableaux conserve leur taille même sans leurs valeurs.
+    // The array summary keeps the size even without the values.
     if (!vocab)
         for (const auto& [key, value] : model.metadata) {
             if (key == "tokenizer.ggml.tokens" && value.starts_with("["))
                 std::from_chars(value.data() + 1, value.data() + value.size(), vocab);
         }
-    // Cache KV, comme llama.cpp : les couches partagées (shared_kv_layers) n'ont pas de cache ; les couches
-    // SWA gardent pad256(min(n_ctx, fenêtre × séquences + ubatch)) cellules (toutes si swa_full), avec leurs propres dimensions de tête.
+    // KV cache, as in llama.cpp: shared layers (shared_kv_layers) have no cache; SWA layers
+    // keep pad256(min(n_ctx, window * sequences + ubatch)) cells (all of them if swa_full), with their own head dimensions.
     const auto pad256 = [](uint64_t n) { return (n + 255) / 256 * 256; };
     const uint32_t n_layer_kv =
         model.shared_kv_layers < model.n_layer ? model.n_layer - model.shared_kv_layers : model.n_layer;
@@ -96,7 +96,7 @@ VramEstimate estimate_vram(const ModelInfo& model, const VramPlanInput& input) {
         const bool swa = model.sliding_window && layer < model.swa_layers.size() && model.swa_layers[layer];
         const uint32_t dim_k = swa && model.head_dim_k_swa ? model.head_dim_k_swa : model.head_dim_k;
         const uint32_t dim_v = swa && model.head_dim_v_swa ? model.head_dim_v_swa : model.head_dim_v;
-        // Les cellules SWA servent toutes les séquences ; le cache plein est multiplié par n_seq.
+        // SWA cells serve every sequence; the full cache is multiplied by n_seq.
         const uint64_t cells = swa ? swa_cells : mul(input.n_ctx, input.n_seq);
         const auto row = add(ggml_type_bytes(input.type_k, dim_k), ggml_type_bytes(input.type_v, dim_v));
         const auto bytes = mul(mul(row, model.n_head_kv), cells);
@@ -105,25 +105,25 @@ VramEstimate estimate_vram(const ModelInfo& model, const VramPlanInput& input) {
     }
     if (model.shared_kv_layers)
         result.notes.push_back(std::to_string(model.shared_kv_layers) +
-                               " couches réutilisent le cache KV des précédentes (aucun cache pour elles)");
-    // Activations et logits en f32 par micro-lot. Sans flash attention, matérialisation
-    // des scores d'attention : micro-lot × contexte × têtes × sizeof(float).
+                               " layers reuse the KV cache of earlier layers (no cache of their own)");
+    // Activations and logits in f32 per micro-batch. Without flash attention, materialize
+    // attention scores: micro-batch × context × heads × sizeof(float).
     const uint64_t ubatch = std::min({input.n_ubatch, input.n_batch, input.n_ctx});
     uint64_t compute = mul(mul(ubatch, add(mul(model.n_embd, activation_vectors), vocab)), float_bytes);
     if (!input.flash_attn) compute = add(compute, mul(mul(mul(ubatch, input.n_ctx), model.n_head), float_bytes));
     const bool gpu_active = gpu_layers > 0 || (output_gpu && result.weights_gpu > 0);
     if (gpu_active) {
         result.compute_gpu = compute;
-        // Une partie CPU subsiste pour les couches et les entrées non déportées.
+        // Some CPU memory remains for layers and inputs that were not offloaded.
         if (gpu_layers < model.n_layer) result.compute_cpu = compute;
         result.overhead_gpu = cuda_overhead;
     } else
         result.compute_cpu = compute;
-    result.notes.push_back("Tampons et surcoût CUDA approximatifs, à calibrer sur des mesures réelles");
+    result.notes.push_back("Compute buffers and CUDA overhead are approximate and should be checked against real measurements");
     if (model.n_expert)
-        result.notes.push_back("MoE : tous les poids des experts sont comptés, même les experts inactifs");
+        result.notes.push_back("MoE: every expert's weights are counted, including inactive experts");
     if (!input.flash_attn && (input.type_v != "f16" && input.type_v != "f32" && input.type_v != "bf16"))
-        result.notes.push_back("Le cache V quantifié nécessite flash attention lors du chargement");
+        result.notes.push_back("A quantized V cache requires flash attention at load time");
     (void)add(add(result.weights_gpu, result.kv_cache_gpu), add(result.compute_gpu, result.overhead_gpu));
     (void)add(add(result.weights_cpu, result.kv_cache_cpu), result.compute_cpu);
     return result;
@@ -131,7 +131,7 @@ VramEstimate estimate_vram(const ModelInfo& model, const VramPlanInput& input) {
 
 int max_gpu_layers_for(const ModelInfo& model, VramPlanInput input, uint64_t budget) {
     if (model.n_layer >= static_cast<uint32_t>(std::numeric_limits<int>::max() - 1))
-        throw Error("Nombre de couches trop grand");
+        throw Error("Layer count is too large");
     int lo = 0, hi = static_cast<int>(model.n_layer) + 1;
     while (lo < hi) {
         const int mid = lo + (hi - lo + 1) / 2;
@@ -143,4 +143,4 @@ int max_gpu_layers_for(const ModelInfo& model, VramPlanInput input, uint64_t bud
     }
     return lo;
 }
-} // namespace banc
+} // namespace waffle

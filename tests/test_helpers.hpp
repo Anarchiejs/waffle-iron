@@ -1,4 +1,4 @@
-// Shared test helpers. File owned by Claude.
+// Shared test helpers.
 #pragma once
 
 #include <catch2/catch_test_macros.hpp>

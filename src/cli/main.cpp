@@ -199,6 +199,7 @@ std::vector<std::string> command_line() {
 #endif
 }
 
+#ifdef _WIN32
 const char* kGeneralHelp = R"HELP(waffle — local GGUF model workbench
 
 Usage: waffle [--db PATH] COMMAND [options]
@@ -220,6 +221,51 @@ Commands:
 MODEL is a file path or a unique substring of the name in the database.
 waffle COMMAND --help   Help for that command.
 )HELP";
+#elif defined(__APPLE__)
+const char* kGeneralHelp = R"HELP(waffle — local GGUF model workbench
+
+Usage: waffle [--db PATH] COMMAND [options]
+
+Commands:
+  scan [folders...]   Record GGUF files found (default model folders otherwise)
+  list                Library: name, quantization, size, parameters, context, path
+  info MODEL          Main metadata and bytes by type
+  plan MODEL          VRAM estimate and how many GPU layers fit
+  bench MODEL         Speed measurement, settings grid, save
+  history MODEL       Measurement history for this model
+  campaigns           Saved campaigns
+  export ID           Export a campaign (--md by default, or --csv)
+  gpu                 One GPU telemetry sample
+
+  --db PATH           SQLite database (default: ~/Library/Application Support/WaffleIron/waffle.db)
+  --help              This help
+
+MODEL is a file path or a unique substring of the name in the database.
+waffle COMMAND --help   Help for that command.
+)HELP";
+#else
+const char* kGeneralHelp = R"HELP(waffle — local GGUF model workbench
+
+Usage: waffle [--db PATH] COMMAND [options]
+
+Commands:
+  scan [folders...]   Record GGUF files found (default model folders otherwise)
+  list                Library: name, quantization, size, parameters, context, path
+  info MODEL          Main metadata and bytes by type
+  plan MODEL          VRAM estimate and how many GPU layers fit
+  bench MODEL         Speed measurement, settings grid, save
+  history MODEL       Measurement history for this model
+  campaigns           Saved campaigns
+  export ID           Export a campaign (--md by default, or --csv)
+  gpu                 One GPU telemetry sample
+
+  --db PATH           SQLite database (default: $XDG_DATA_HOME/WaffleIron/waffle.db or ~/.local/share/WaffleIron/waffle.db)
+  --help              This help
+
+MODEL is a file path or a unique substring of the name in the database.
+waffle COMMAND --help   Help for that command.
+)HELP";
+#endif
 
 const char* kScanHelp = "waffle scan [folders...]\n\nWalks the folders (or the default model folders) and records each "
                         "GGUF.\n";
@@ -234,7 +280,7 @@ const char* kPlanHelp = R"HELP(waffle plan MODEL [options]
   --fa 0|1           Flash attention
   --swa-full 0|1     SWA cache sized to the context (1, llama.cpp default) or to the window only (0)
   --budget-gib X     VRAM budget in GiB (default: free VRAM from telemetry)
-  --verify           Load the model on the GPU and measure the gap versus the estimate
+  --verify           Load the model and measure the gap versus the estimate
 )HELP";
 const char* kBenchHelp = R"HELP(waffle bench MODEL [options]
 
@@ -258,7 +304,12 @@ const char* kExportHelp = R"HELP(waffle export ID [options]
   --csv              CSV
   -o FILE            Write a file instead of standard output
 )HELP";
+#ifdef __APPLE__
+const char* kGpuHelp = "waffle gpu\n\nPrints one Metal memory sample, or why telemetry is unavailable.\n"
+                       "Utilization, temperature, power, and clock are not available from Metal and stay at zero.\n";
+#else
 const char* kGpuHelp = "waffle gpu\n\nPrints one NVML sample, or why telemetry is unavailable.\n";
+#endif
 
 struct Invocation {
     std::optional<std::filesystem::path> db;
@@ -487,7 +538,9 @@ void verify_plan(waffle::Store& store, const std::filesystem::path& path, const 
                  const waffle::VramEstimate& estimate) {
     waffle::Telemetry telemetry;
     const auto before = telemetry.sample();
+#if !defined(__APPLE__)
     if (!before) throw waffle::Error("Cannot verify: " + telemetry.error());
+#endif
 
     waffle::LoadParams params;
     params.model_path = path;
@@ -513,17 +566,40 @@ void verify_plan(waffle::Store& store, const std::filesystem::path& path, const 
         allocations.push_back(std::move(line));
     });
     uint64_t measured = 0;
+    bool measured_memory = false;
     engine
         .submit([&](waffle::EngineSession& session) {
             session.load(params);
             // A first decode allocates the final compute buffers.
             const auto tokens = session.tokenize("Hello", true);
             session.decode(tokens, 0);
-            if (const auto after = telemetry.sample())
-                measured = after->vram_used > before->vram_used ? after->vram_used - before->vram_used : 0;
+            if (before)
+                if (const auto after = telemetry.sample()) {
+                    measured_memory = true;
+                    measured = after->vram_used > before->vram_used ? after->vram_used - before->vram_used : 0;
+                }
             session.unload();
         })
         .get();
+
+#if defined(__APPLE__)
+    if (!measured_memory) {
+        std::cout << "Measured GPU    not measured\n"
+                  << "The model loaded. No Metal memory sample was available, so the gap was not computed.\n";
+        waffle::VramCheck skipped;
+        skipped.model_path = utf8_from_path(path);
+        skipped.timestamp = now_iso();
+        skipped.config = "ngl=" + std::to_string(input.n_gpu_layers) + " ctx=" + std::to_string(input.n_ctx) +
+                         " kv=" + input.type_k + "/" + input.type_v + " fa=" + (input.flash_attn ? "on" : "off") +
+                         (input.swa_full ? "" : " swa=window") + " (memory not measured)";
+        skipped.estimated_gpu = estimate.total_gpu();
+        skipped.measured_gpu = 0;
+        store.save_vram_check(skipped);
+        return;
+    }
+#else
+    (void)measured_memory;
+#endif
 
     const uint64_t estimated = estimate.total_gpu();
     const double gap = estimated ? (static_cast<double>(measured) - static_cast<double>(estimated)) /

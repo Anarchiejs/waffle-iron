@@ -1,3 +1,4 @@
+#include "ui/icons.hpp"
 #include "ui/view.hpp"
 #include "ui/theme.hpp"
 #include "ui/widgets.hpp"
@@ -30,7 +31,7 @@ public:
     bool rescan = false;
     const char* title() const override { return "Library"; }
     const char* subtitle() const override { return "Your GGUF models: metadata, weight layout, tags, and notes."; }
-    const char* icon() const override { return ""; }
+    const char* icon() const override { return icon_library; }
     // Indexes the known folders from the first frame, even when this page is not shown.
     void tick(AppContext& ctx) override {
         if (!initialized_) {
@@ -149,7 +150,11 @@ private:
         if (ImGui::BeginPopup("Model folder")) {
             card_title("Add a model folder", "Full path of a folder that contains .gguf files.");
             ImGui::SetNextItemWidth(-FLT_MIN);
+#ifdef _WIN32
             ImGui::InputTextWithHint("##Path", "%USERPROFILE%\\models", folder_.data(), folder_.size());
+#else
+            ImGui::InputTextWithHint("##Path", "~/models", folder_.data(), folder_.size());
+#endif
             if (primary_button("Add and scan") && folder_[0]) {
                 auto p = std::filesystem::u8path(folder_.data());
                 if (std::filesystem::is_directory(p)) {
@@ -166,7 +171,11 @@ private:
     void empty_library() {
         card_title("No model found", "On startup, Waffle Iron indexes the .gguf files in these folders:");
         const auto roots = candidate_model_roots();
+#ifdef _WIN32
         if (roots.empty()) dim_wrapped("No known location: the USERPROFILE variable is missing.");
+#else
+        if (roots.empty()) dim_wrapped("No known location: the HOME variable is missing.");
+#endif
         for (const auto& root : roots) {
             std::error_code ec;
             const bool present = std::filesystem::is_directory(root, ec);

@@ -1,4 +1,5 @@
 #include "core/bench.hpp"
+#include "ui/icons.hpp"
 #include "ui/theme.hpp"
 #include "ui/view.hpp"
 #include "ui/widgets.hpp"
@@ -16,6 +17,7 @@
 #include <map>
 #include <mutex>
 #include <sstream>
+#include <string_view>
 
 namespace waffle::ui {
 namespace {
@@ -491,7 +493,11 @@ class BenchView final : public View {
                     const auto* a = static_cast<decltype(axis)*>(data);
                     const auto t = static_cast<std::time_t>(a->origin + v);
                     std::tm tm{};
+#ifdef _WIN32
                     localtime_s(&tm, &t);
+#else
+                    localtime_r(&t, &tm);
+#endif
                     return static_cast<int>(std::strftime(buf, static_cast<size_t>(size), a->format, &tm));
                 },
                 &axis);
@@ -542,9 +548,39 @@ class BenchView final : public View {
 
 public:
     BenchView() {
+#ifdef _WIN32
         const char* home = std::getenv("USERPROFILE");
         auto path = (home ? std::filesystem::path(home) : std::filesystem::current_path()) / "Documents" /
                     "WaffleIron" / "campaign.csv";
+#else
+        std::filesystem::path documents;
+#if defined(__APPLE__)
+        const char* home = std::getenv("HOME");
+        documents = (home && *home ? std::filesystem::path(home) : std::filesystem::current_path()) / "Documents";
+#else
+        if (const char* xdg = std::getenv("XDG_DOCUMENTS_DIR"); xdg && *xdg) {
+            documents = std::filesystem::path(xdg);
+        } else if (const char* home = std::getenv("HOME"); home && *home) {
+            documents = std::filesystem::path(home) / "Documents";
+            std::ifstream dirs(std::filesystem::path(home) / ".config" / "user-dirs.dirs");
+            std::string line;
+            while (std::getline(dirs, line)) {
+                constexpr std::string_view key = "XDG_DOCUMENTS_DIR=";
+                if (!line.starts_with(key)) continue;
+                std::string value = line.substr(key.size());
+                if (value.size() >= 2 && value.front() == '"' && value.back() == '"')
+                    value = value.substr(1, value.size() - 2);
+                constexpr std::string_view token = "$HOME";
+                if (value.starts_with(token)) value = std::string(home) + value.substr(token.size());
+                if (!value.empty()) documents = std::filesystem::path(value);
+                break;
+            }
+        } else {
+            documents = std::filesystem::current_path() / "Documents";
+        }
+#endif
+        auto path = documents / "WaffleIron" / "campaign.csv";
+#endif
         auto utf8 = path.u8string();
         std::snprintf(path_, sizeof(path_), "%s", reinterpret_cast<const char*>(utf8.c_str()));
     }
@@ -560,7 +596,7 @@ public:
     const char* subtitle() const override {
         return "Measure throughput, latency, and VRAM on a grid of configurations, then follow them over time.";
     }
-    const char* icon() const override { return ""; }
+    const char* icon() const override { return icon_bench; }
     void draw(AppContext& ctx) override {
         engine_ = &ctx.engine;
         if (ctx.selected_model != seen_selection_) {

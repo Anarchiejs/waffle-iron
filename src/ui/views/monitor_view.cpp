@@ -1,3 +1,4 @@
+#include "ui/icons.hpp"
 #include "ui/view.hpp"
 #include "ui/theme.hpp"
 #include "ui/widgets.hpp"
@@ -81,15 +82,25 @@ public:
     const char* subtitle() const override {
         return "Live GPU telemetry: load, memory, temperature, power, and generation throughput.";
     }
-    const char* icon() const override { return ""; }
+    const char* icon() const override { return icon_monitor; }
     void draw(AppContext& ctx) override {
         if (!ctx.telemetry.available()) {
             if (begin_card("##nvml")) {
+#if defined(__APPLE__)
+                card_title("GPU telemetry unavailable");
+#else
                 card_title("NVML unavailable");
+#endif
                 dim_wrapped((ctx.telemetry.error() + ". GPU measurements are not available.").c_str());
             }
             end_card();
         }
+#if defined(__APPLE__)
+        else {
+            dim_wrapped("Metal reports the device name and this process's allocation against the recommended working "
+                        "set. Utilization, temperature, power, and clock are not published by Metal and stay at zero.");
+        }
+#endif
         // History window: segmented buttons.
         ImGui::AlignTextToFramePadding();
         ImGui::TextDisabled("Window");

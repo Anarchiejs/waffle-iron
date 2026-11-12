@@ -16,40 +16,76 @@
       "name": "cpu-debug",
       "inherits": "base",
       "displayName": "CPU, Debug (day-to-day development, tests)",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "WAFFLE_CUDA": "OFF" }
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "WAFFLE_CUDA": "OFF",
+        "WAFFLE_METAL": "OFF"
+      }
     },
     {
       "name": "cpu-release",
       "inherits": "base",
       "displayName": "CPU, Release (CI)",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "WAFFLE_CUDA": "OFF" }
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "WAFFLE_CUDA": "OFF",
+        "WAFFLE_METAL": "OFF"
+      }
     },
     {
       "name": "cuda-release",
       "inherits": "base",
       "displayName": "CUDA, Release (sm_89)",
+      "condition": {
+        "type": "notEquals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      },
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "WAFFLE_CUDA": "ON",
+        "WAFFLE_METAL": "OFF",
         "CMAKE_CUDA_ARCHITECTURES": "89"
+      }
+    },
+    {
+      "name": "metal-release",
+      "inherits": "base",
+      "displayName": "Metal, Release (Apple GPU)",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "WAFFLE_CUDA": "OFF",
+        "WAFFLE_METAL": "ON"
       }
     },
     {
       "name": "asan",
       "inherits": "base",
       "displayName": "CPU, Debug + AddressSanitizer",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "WAFFLE_CUDA": "OFF", "WAFFLE_ASAN": "ON" }
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "WAFFLE_CUDA": "OFF",
+        "WAFFLE_METAL": "OFF",
+        "WAFFLE_ASAN": "ON"
+      }
     }
   ],
   "buildPresets": [
     { "name": "cpu-debug", "configurePreset": "cpu-debug" },
     { "name": "cpu-release", "configurePreset": "cpu-release" },
     { "name": "cuda-release", "configurePreset": "cuda-release" },
+    { "name": "metal-release", "configurePreset": "metal-release" },
     { "name": "asan", "configurePreset": "asan" }
   ],
   "testPresets": [
     { "name": "cpu-debug", "configurePreset": "cpu-debug", "output": { "outputOnFailure": true } },
     { "name": "cpu-release", "configurePreset": "cpu-release", "output": { "outputOnFailure": true } },
+    { "name": "metal-release", "configurePreset": "metal-release", "output": { "outputOnFailure": true } },
     { "name": "asan", "configurePreset": "asan", "output": { "outputOnFailure": true } }
   ]
 }

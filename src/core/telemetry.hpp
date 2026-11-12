@@ -1,4 +1,5 @@
-// GPU telemetry via NVML, loaded dynamically (nvml.dll): no CUDA build dependency.
+// GPU telemetry. Windows and Linux load NVML dynamically (no CUDA Toolkit dependency).
+// macOS reads the Metal device instead: NVML is not shipped there.
 #pragma once
 
 #include "core/types.hpp"

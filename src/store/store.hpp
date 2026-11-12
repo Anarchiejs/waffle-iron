@@ -63,7 +63,10 @@ public:
     Store(const Store&) = delete;
     Store& operator=(const Store&) = delete;
 
-    // %LOCALAPPDATA%\WaffleIron\waffle.db (directory created if needed).
+    // Library database (directory created if needed):
+    //   Windows: %LOCALAPPDATA%\WaffleIron\waffle.db
+    //   macOS:   ~/Library/Application Support/WaffleIron/waffle.db
+    //   Linux:   $XDG_DATA_HOME/WaffleIron/waffle.db, or ~/.local/share/WaffleIron/waffle.db
     static std::filesystem::path default_path();
 
     // --- Library

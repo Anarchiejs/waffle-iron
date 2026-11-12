@@ -355,10 +355,19 @@ std::filesystem::path Store::default_path() {
     }
     if (dir.empty()) dir = std::filesystem::temp_directory_path();
     dir /= "WaffleIron";
-#else
+#elif defined(__APPLE__)
     const char* home = std::getenv("HOME");
-    std::filesystem::path dir = home && *home ? std::filesystem::path(home) / ".local" / "share" / "WaffleIron"
-                                              : std::filesystem::temp_directory_path() / "WaffleIron";
+    std::filesystem::path dir = home && *home
+                                    ? std::filesystem::path(home) / "Library" / "Application Support" / "WaffleIron"
+                                    : std::filesystem::temp_directory_path() / "WaffleIron";
+#else
+    std::filesystem::path dir;
+    if (const char* xdg = std::getenv("XDG_DATA_HOME"); xdg && *xdg)
+        dir = std::filesystem::path(xdg) / "WaffleIron";
+    else if (const char* home = std::getenv("HOME"); home && *home)
+        dir = std::filesystem::path(home) / ".local" / "share" / "WaffleIron";
+    else
+        dir = std::filesystem::temp_directory_path() / "WaffleIron";
 #endif
     std::filesystem::create_directories(dir);
     return dir / "waffle.db";

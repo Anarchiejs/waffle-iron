@@ -8,10 +8,11 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
-#elif defined(__APPLE__)
-#include "core/telemetry_metal.hpp"
 #else
 #include <dlfcn.h>
+#if defined(__APPLE__)
+#include "core/telemetry_metal.hpp"
+#endif
 #endif
 
 namespace waffle {

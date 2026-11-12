@@ -154,11 +154,22 @@ bool apply_theme(float dpi, const std::filesystem::path& assets) {
     bool merged = false;
     const auto icons = assets / "fonts/lucide.ttf";
     if (std::filesystem::exists(icons)) {
+        // Only the private-use icons. Merging the whole file is unnecessary, and a
+        // font that also covered ASCII would replace digits in the UI.
+        static const ImWchar icon_ranges[] = {
+            0xE038, 0xE038, // activity
+            0xE098, 0xE098, // columns-2
+            0xE0A9, 0xE0A9, // cpu
+            0xE0E2, 0xE0E2, // git-branch
+            0xE100, 0xE100, // library
+            0xE1BF, 0xE1BF, // gauge
+            0,
+        };
         ImFontConfig cfg;
         cfg.MergeMode = true;
         cfg.PixelSnapH = true;
-        cfg.GlyphOffset.y = 2 * dpi;
-        merged = io.Fonts->AddFontFromFileTTF(icons.string().c_str(), size, &cfg) != nullptr;
+        cfg.GlyphOffset.y = 0.5f * dpi;
+        merged = io.Fonts->AddFontFromFileTTF(icons.string().c_str(), size, &cfg, icon_ranges) != nullptr;
     }
     if (!semibold.empty()) g_fonts.semibold = io.Fonts->AddFontFromFileTTF(semibold.string().c_str(), size);
     if (!g_fonts.semibold) g_fonts.semibold = g_fonts.regular;

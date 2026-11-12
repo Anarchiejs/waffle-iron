@@ -15,7 +15,7 @@ Two programs:
 
 Supported platforms: Windows x64, Linux x64, and macOS (Apple Silicon and Intel).
 
-The GitHub repository is [Banc-Local](https://github.com/Anarchiejs/Banc-Local). If that repository is renamed to `waffle-iron`, GitHub keeps the old URL working.
+The GitHub repository is [waffle-iron](https://github.com/Anarchiejs/waffle-iron).
 
 ## Limits
 
@@ -25,7 +25,7 @@ The GitHub repository is [Banc-Local](https://github.com/Anarchiejs/Banc-Local).
 - Waffle Iron does not download models and does not contact Ollama, LM Studio, or `registry.ollama.ai`. That name is only a prefix in local manifest paths. The scan reads GGUF files on disk and, when those folders exist, Ollama blobs and manifest JSON, so it can name a digest and skip draft and projector blobs.
 - Nothing is uploaded. "Telemetry" in the source is local NVML sampling, or a local Metal query on macOS. The first build does use the network, for the llama.cpp submodule and the vcpkg ports.
 - The library database is per user (see [Where the data lives](#where-the-data-lives)). It stores the full path of each file. Interface state is `imgui.ini` next to the executable. Exports go to the path you choose.
-- Memory estimates are approximate. **Verify for real** checks them on the installed GPU. A result from one card does not transfer to another. The fixed GPU overhead in the estimate was calibrated against CUDA.
+- Memory estimates are approximate. **Verify for real** checks them on the installed GPU when a memory reading is available. On macOS that reading is the Metal allocation of this process; if Metal does not report one, the model still loads and the gap is left unmeasured. A result from one card does not transfer to another. The fixed GPU overhead in the estimate was calibrated against CUDA.
 - Waffle Iron is not an official project of ggml, Ollama, LM Studio, NVIDIA, or Apple. No model weights are included, except the random-weight test fixture `tests/data/tiny-llama.gguf`.
 
 ## Requirements
@@ -53,13 +53,39 @@ Without the CUDA Toolkit the interface still builds: models run on the CPU. The 
 | Tool | Required | Notes |
 |---|---|---|
 | Git | yes | distribution package |
-| GCC 11+ or Clang 14+ | yes | Debian/Ubuntu: `build-essential` |
+| GCC 11+ or Clang 14+ | yes | Debian/Ubuntu: `build-essential`. Fedora: `gcc-c++`. Arch: `base-devel` |
 | CMake ≥ 3.25 and Ninja | yes | `cmake` and `ninja-build` |
-| vcpkg | yes | see the install steps below |
-| OpenGL headers | yes, for the interface | Debian/Ubuntu: `libgl1-mesa-dev`. Fedora: `mesa-libGL-devel` |
-| Autotools | yes, for the interface | vcpkg builds GLFW's X11 dependencies from source. Debian/Ubuntu: `autoconf autoconf-archive automake libtool pkg-config xutils-dev`. Fedora: `autoconf autoconf-archive automake libtool pkgconf xorg-x11-util-macros` |
+| zip | yes | vcpkg's `bootstrap-vcpkg.sh` uses it. Debian/Ubuntu and Arch: `zip`. Fedora: `zip` |
+| vcpkg | yes | see the install steps below. Clone it without `--depth` |
+| OpenGL and GLFW's X11 headers | yes, for the interface | see the package line below |
+| Autotools | yes, for the interface | vcpkg builds some X11 dependencies from source |
 | NVIDIA driver | only for NVML and a CUDA build | the monitor loads `libnvidia-ml.so.1` from the driver |
 | CUDA Toolkit (`nvcc`) | no | https://developer.nvidia.com/cuda-downloads |
+
+Debian/Ubuntu:
+
+```bash
+sudo apt-get install -y build-essential git cmake ninja-build pkg-config zip \
+  autoconf autoconf-archive automake libtool xutils-dev \
+  libgl1-mesa-dev libglu1-mesa-dev \
+  libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev libxxf86vm-dev
+```
+
+Fedora:
+
+```bash
+sudo dnf install git gcc-c++ cmake ninja-build pkgconf zip \
+  autoconf autoconf-archive automake libtool xorg-x11-util-macros \
+  mesa-libGL-devel mesa-libGLU-devel \
+  libX11-devel libXrandr-devel libXinerama-devel libXcursor-devel libXi-devel libXext-devel libXxf86vm-devel
+```
+
+Arch Linux:
+
+```bash
+sudo pacman -S --needed base-devel git cmake ninja pkgconf zip \
+  mesa glu libx11 libxrandr libxinerama libxcursor libxi libxext libxxf86vm
+```
 
 The interface needs an X11 display or XWayland. A Wayland-only session without XWayland can still build and use `waffle`. Pass `-DWAFFLE_BUILD_UI=OFF` to configure a command-line-only build.
 
@@ -79,7 +105,7 @@ A CPU build (`--cpu`, preset `cpu-release`) does not need the Metal compiler. Th
 Windows:
 
 ```bat
-git clone --recurse-submodules https://github.com/Anarchiejs/Banc-Local.git waffle-iron
+git clone --recurse-submodules https://github.com/Anarchiejs/waffle-iron.git waffle-iron
 cd waffle-iron
 install.cmd
 ```
@@ -87,12 +113,11 @@ install.cmd
 Linux and macOS, after CMake, Ninja, a C++ compiler, and vcpkg are installed:
 
 ```bash
-git clone --recurse-submodules https://github.com/Anarchiejs/Banc-Local.git waffle-iron
+git clone --recurse-submodules https://github.com/Anarchiejs/waffle-iron.git waffle-iron
 cd waffle-iron
-# if vcpkg is not already on the machine:
-# git clone https://github.com/microsoft/vcpkg "$HOME/vcpkg"
-# "$HOME/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
-# export VCPKG_ROOT="$HOME/vcpkg"
+# if vcpkg is not already on the machine, ./install.sh clones it.
+# Do not use git clone --depth: vcpkg manifest mode needs the builtin-baseline
+# commit recorded in vcpkg.json, and a shallow clone does not contain it.
 ./install.sh
 ```
 
@@ -164,7 +189,7 @@ The profile directory is `%USERPROFILE%` on Windows and `$HOME` on Linux and mac
 | `<profile>/.ollama/models/blobs` | Ollama blobs (often with no extension; the `GGUF` signature is enough) |
 | `<profile>/.lmstudio/models` | LM Studio models |
 | `<profile>/.cache/lm-studio/models` | older LM Studio cache folder |
-| `/usr/share/ollama/.ollama/models/blobs` | Linux only: the Ollama systemd service user |
+| `/usr/share/ollama/.ollama/models/blobs` | Linux fallback when the service user is the official `ollama` account. The scan also reads `OLLAMA_MODELS` from the process and from the systemd unit, and the home directory of the `ollama` user |
 | `$OLLAMA_MODELS/blobs`, or `$OLLAMA_MODELS` when there is no `blobs` subfolder | a moved Ollama library (`OLLAMA_MODELS` on every platform) |
 
 On Windows those profile paths are `%USERPROFILE%\models`, `%USERPROFILE%\.ollama\models\blobs`, `%USERPROFILE%\.lmstudio\models`, and `%USERPROFILE%\.cache\lm-studio\models`.
@@ -251,7 +276,7 @@ The versioned presets are in `CMakePresets.json`. `install.cmd` and `./install.s
 | `cpu-release` | CPU Release, the one CI uses on Windows, Linux, and macOS |
 | `cuda-release` | CUDA Release, architecture `sm_89` only (Ada). Windows and Linux. It does not run on `sm_86` or on Blackwell |
 | `metal-release` | Metal Release on macOS |
-| `asan` | CPU Debug with AddressSanitizer (MSVC `/fsanitize=address`, GCC/Clang `-fsanitize=address`) |
+| `asan` | CPU Debug with AddressSanitizer (MSVC `/fsanitize=address`, GCC/Clang `-fsanitize=address`). On Linux and macOS this links the release vcpkg libraries, so a release-only vcpkg install is enough |
 
 When an NVIDIA GPU is detected, the installer writes `CMakeUserPresets.json` (gitignored): a `cuda-release-local` preset that inherits `cuda-release` and replaces `CMAKE_CUDA_ARCHITECTURES` (for example `86` for Ampere, `89` for Ada, `120` for Blackwell). The binary goes to `build/cuda-release-local`. The repository's `cuda-release` preset stays on `sm_89` and its `build/cuda-release` directory. Use that preset only for an `sm_89` GPU. The installer is the path that matches the installed card. On macOS the installer selects `metal-release` and does not write a user preset.
 
@@ -308,7 +333,7 @@ On Windows, run those three commands through `scripts\dev.cmd` instead of `scrip
 |---|---|---|---|
 | Library, campaigns, VRAM checks | `%LOCALAPPDATA%\WaffleIron\waffle.db` | `$XDG_DATA_HOME/WaffleIron/waffle.db`, or `~/.local/share/WaffleIron/waffle.db` | `~/Library/Application Support/WaffleIron/waffle.db` |
 | Interface state | `imgui.ini` next to the executable | same | same |
-| Optional fonts | `assets/fonts/` next to the executable (copied at build time) | same | same |
+| Icon font and optional Inter | `assets/fonts/` next to the executable (copied at build time; `lucide.ttf` is included) | same | same |
 | Binaries | `build\cpu-release\`, `build\cuda-release\`, or `build\cuda-release-local\` | `build/cpu-release/`, `build/cuda-release/`, or `build/cuda-release-local/` | `build/cpu-release/` or `build/metal-release/` |
 | Last executable started by the installer | `build\waffle-launch.txt` | `build/waffle-launch.txt` | `build/waffle-launch.txt` |
 | Local CUDA preset | `CMakeUserPresets.json` at the root (not versioned) | same | not written (Metal has no CUDA architecture) |
@@ -347,7 +372,9 @@ Deleting `waffle.db` starts from an empty library; the next scan rebuilds it. Th
 
 **macOS: `./install.sh` built the CPU preset.** `xcrun metal` was not found. Install Xcode (the command-line tools alone do not always include the Metal compiler) and run `./install.sh` again, or configure `metal-release` yourself.
 
-**`VCPKG_ROOT` is empty on Linux or macOS.** Clone vcpkg, run `bootstrap-vcpkg.sh`, and export `VCPKG_ROOT`. `scripts/dev.sh` looks in `$HOME/vcpkg`, `/opt/vcpkg`, and `/usr/local/vcpkg` when the variable is unset.
+**`VCPKG_ROOT` is empty on Linux or macOS.** `./install.sh` clones vcpkg into `$HOME/vcpkg` without `--depth`, bootstraps it, and fetches the `builtin-baseline` commit when that commit is missing. A shallow clone (`git clone --depth 1`) does not contain that commit, and manifest mode then fails. `scripts/dev.sh` looks in `$HOME/vcpkg`, `/opt/vcpkg`, and `/usr/local/vcpkg` when the variable is unset.
+
+**Linux: vcpkg or GLFW fails while configuring.** Install `zip` and the X11 development packages in the Linux requirements. `./install.sh` checks for them before configure.
 
 ## Architecture
 
@@ -374,10 +401,10 @@ CI (`.github/workflows/ci.yml`) builds and tests the `cpu-release` preset on Win
 
 ## Fonts
 
-The interface uses Inter and the Lucide icons when `Inter-Regular.ttf`, `Inter-SemiBold.ttf`, and `lucide.ttf` are in `assets/fonts/` (see that folder's README). Otherwise it tries a system font (Segoe UI on Windows, DejaVu or Liberation on Linux, Arial on macOS) and then ImGui's built-in font. Nothing is downloaded at install time.
+`lucide.ttf` is shipped in `assets/fonts/` and copied next to `WaffleIron` for every preset that builds the interface (`NOTICE` has the ISC and Feather terms). Inter is optional: place `Inter-Regular.ttf` and `Inter-SemiBold.ttf` in that same folder. Otherwise the interface uses a system font (Segoe UI on Windows, DejaVu or Liberation on Linux, Arial on macOS) and then ImGui's built-in font. Sidebar icons use the Lucide font when it was copied; without it they are drawn as strokes, because a missing private-use glyph shows up as a box.
 
-- Inter: https://github.com/rsms/inter (SIL Open Font License 1.1)
-- Lucide: https://github.com/lucide-icons/lucide (ISC, private-use range)
+- Inter: https://github.com/rsms/inter (SIL Open Font License 1.1). Not included.
+- Lucide: https://github.com/lucide-icons/lucide (ISC, plus MIT for the Feather icons it incorporates). Included as `assets/fonts/lucide.ttf`.
 
 ## Developer switches
 
@@ -395,4 +422,4 @@ These environment variables are read on the local machine. They do not send anyt
 
 ## License
 
-Waffle Iron is MIT. The text is in `LICENSE` (copyright 2026 Anarchy). Third-party terms are in `THIRD_PARTY.md`. Optional fonts, if you add them under `assets/fonts/`, keep their own licenses.
+Waffle Iron is MIT. The text is in `LICENSE` (copyright 2026 Anarchy). Third-party terms are in `THIRD_PARTY.md`. The included Lucide font is covered by `NOTICE`. Optional fonts, if you add them under `assets/fonts/`, keep their own licenses.

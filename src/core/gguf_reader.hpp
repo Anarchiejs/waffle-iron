@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace waffle {
@@ -23,9 +24,14 @@ ModelInfo read_gguf(const std::filesystem::path& path, bool with_tensors = true)
 //   <profile>/.ollama/models/blobs
 //   <profile>/.lmstudio/models
 //   <profile>/.cache/lm-studio/models
-// Linux also lists the Ollama service library /usr/share/ollama/.ollama/models/blobs.
 // OLLAMA_MODELS contributes its blobs directory, or OLLAMA_MODELS itself when it has no blobs subdirectory.
+// On Linux the Ollama service is discovered from systemd Environment=OLLAMA_MODELS, then from the
+// ollama user's home directory. /usr/share/ollama/.ollama/models/blobs stays as a fallback.
 std::vector<std::filesystem::path> candidate_model_roots();
+
+// Last OLLAMA_MODELS assignment in systemd Environment= lines.
+// nullopt when the key is absent. An empty string means a later line cleared it.
+std::optional<std::string> ollama_models_from_systemd_text(std::string_view text);
 
 // Subset of candidate_model_roots() whose directory exists on this machine.
 std::vector<std::filesystem::path> default_model_roots();

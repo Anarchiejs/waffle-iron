@@ -8,7 +8,7 @@ It parses GGUF files with the pinned [llama.cpp](https://github.com/ggml-org/lla
 
 Please use GitHub private vulnerability reporting:
 
-https://github.com/Anarchiejs/Banc-Local/security/advisories/new
+https://github.com/Anarchiejs/waffle-iron/security/advisories/new
 
 If the repository is renamed to `waffle-iron`, use the security page of the new URL. GitHub redirects the old one.
 

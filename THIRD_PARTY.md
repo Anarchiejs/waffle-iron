@@ -46,12 +46,11 @@ https://github.com/catchorg/Catch2
 
 ## Fonts
 
-`assets/fonts/` ships no font files, only instructions. If you add them, keep their notices with any redistribution:
+`assets/fonts/lucide.ttf` (Lucide 0.544.0) is included. The build copies it next to `WaffleIron`, and `NOTICE` carries the full ISC text plus the MIT notice for the Feather icons incorporated into Lucide. https://github.com/lucide-icons/lucide
 
-- Inter (`Inter-Regular.ttf`, `Inter-SemiBold.ttf`): SIL Open Font License 1.1. https://github.com/rsms/inter
-- Lucide (`lucide.ttf`): ISC License. https://github.com/lucide-icons/lucide
+Inter (`Inter-Regular.ttf`, `Inter-SemiBold.ttf`) is not included. If you add it, keep the SIL Open Font License 1.1 notice with any redistribution. https://github.com/rsms/inter
 
-Without those files, the interface uses Dear ImGui's built-in font.
+Without Inter, the interface uses a system font or Dear ImGui's built-in font. Sidebar icons fall back to drawn strokes when `lucide.ttf` is missing beside the binary.
 
 ## GLFW
 

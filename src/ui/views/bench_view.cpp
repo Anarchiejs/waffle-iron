@@ -1,4 +1,5 @@
 #include "core/bench.hpp"
+#include "ui/icons.hpp"
 #include "ui/theme.hpp"
 #include "ui/view.hpp"
 #include "ui/widgets.hpp"
@@ -595,7 +596,7 @@ public:
     const char* subtitle() const override {
         return "Measure throughput, latency, and VRAM on a grid of configurations, then follow them over time.";
     }
-    const char* icon() const override { return ""; }
+    const char* icon() const override { return icon_bench; }
     void draw(AppContext& ctx) override {
         engine_ = &ctx.engine;
         if (ctx.selected_model != seen_selection_) {

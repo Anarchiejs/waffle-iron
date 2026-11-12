@@ -1,4 +1,5 @@
 #include "core/comparator.hpp"
+#include "ui/icons.hpp"
 #include "ui/theme.hpp"
 #include "ui/view.hpp"
 #include "ui/widgets.hpp"
@@ -224,7 +225,7 @@ public:
     const char* subtitle() const override {
         return "Two models or two settings, one prompt: replies and measurements side by side.";
     }
-    const char* icon() const override { return ""; }
+    const char* icon() const override { return icon_compare; }
     void draw(AppContext& ctx) override {
         engine_ = &ctx.engine;
         if (ctx.selected_model != seen_selection_) {

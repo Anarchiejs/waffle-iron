@@ -34,6 +34,12 @@ if(MSVC)
 elseif(WAFFLE_ASAN)
   add_compile_options(-fsanitize=address -fno-omit-frame-pointer -g)
   add_link_options(-fsanitize=address)
+  # A manifest install is often release-only. Debug then looks for missing
+  # debug/lib archives. Prefer the release vcpkg libraries; our objects stay
+  # instrumented. The empty entry still accepts config-less imported targets
+  # such as OpenGL::GL from FindOpenGL.
+  set(CMAKE_MAP_IMPORTED_CONFIG_DEBUG "Release;" CACHE STRING
+      "Imported configs tried by the AddressSanitizer Debug build" FORCE)
 endif()
 
 # --- llama.cpp (pinned submodule) ----------------------------------------
@@ -92,6 +98,8 @@ endif()
 # --- Command-line tool ------------------------------------------------------
 add_executable(waffle src/cli/main.cpp)
 target_link_libraries(waffle PRIVATE waffle_core)
+include(GNUInstallDirs)
+install(TARGETS waffle RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 # --- Graphical application --------------------------------------------------
 if(WAFFLE_BUILD_UI)
@@ -131,8 +139,21 @@ if(WAFFLE_BUILD_UI)
     endif()
   endif()
   set_target_properties(waffle_gui PROPERTIES OUTPUT_NAME "WaffleIron")
-  add_custom_command(TARGET waffle_gui POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/assets $<TARGET_FILE_DIR:waffle_gui>/assets)
+  # Every preset that builds the interface copies assets (including lucide.ttf) and NOTICE
+  # next to the binary, including when only the font changed and the executable is up to date.
+  add_custom_target(waffle_assets ALL
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/assets" "$<TARGET_FILE_DIR:waffle_gui>/assets"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/NOTICE" "$<TARGET_FILE_DIR:waffle_gui>/NOTICE"
+    VERBATIM
+    COMMENT "Copy assets and NOTICE next to WaffleIron")
+  add_dependencies(waffle_assets waffle_gui)
+  install(TARGETS waffle_gui RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+  install(DIRECTORY "${CMAKE_SOURCE_DIR}/assets" DESTINATION "${CMAKE_INSTALL_BINDIR}")
+  install(FILES
+    "${CMAKE_SOURCE_DIR}/NOTICE"
+    "${CMAKE_SOURCE_DIR}/LICENSE"
+    "${CMAKE_SOURCE_DIR}/THIRD_PARTY.md"
+    DESTINATION "${CMAKE_INSTALL_BINDIR}")
 endif()
 
 # --- Tests ------------------------------------------------------------------

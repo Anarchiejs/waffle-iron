@@ -1,3 +1,4 @@
+#include "ui/icons.hpp"
 #include "ui/view.hpp"
 #include "ui/theme.hpp"
 #include "ui/widgets.hpp"
@@ -28,6 +29,9 @@ std::string config_label(const LoadParams& p) {
 }
 std::string signed_bytes(int64_t v) {
     return (v < 0 ? "−" : "+") + format_bytes(static_cast<uint64_t>(v < 0 ? -v : v));
+}
+bool memory_was_measured(const VramCheck& check) {
+    return check.config.find("memory not measured") == std::string::npos;
 }
 class VramView final : public View {
     LoadParams params_;
@@ -77,7 +81,12 @@ class VramView final : public View {
         ImGui::EndDisabled();
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
             ImGui::SetTooltip("Largest layer count whose estimate fits in the VRAM that is free right now.");
-        ImGui::BeginDisabled(checking_.valid() || ctx.engine.state() != EngineState::Idle || !sample);
+#if defined(__APPLE__)
+        const bool need_sample = false;
+#else
+        const bool need_sample = !sample;
+#endif
+        ImGui::BeginDisabled(checking_.valid() || ctx.engine.state() != EngineState::Idle || need_sample);
         if (primary_button("Verify for real", {-FLT_MIN, 0})) start_check(ctx, estimate->total_gpu());
         ImGui::EndDisabled();
         if (checking_.valid() && busy_indicator("Verifying...")) ctx.engine.cancel_all();
@@ -87,11 +96,13 @@ class VramView final : public View {
 #if !defined(WAFFLE_HAS_CUDA) && !defined(WAFFLE_HAS_METAL)
         dim_wrapped("CPU build: the load uses the CPU; the measurement does not validate a CUDA estimate.");
 #elif defined(WAFFLE_HAS_METAL)
-        dim_wrapped(
-            "Metal build: verification measures this Mac. The estimate's fixed overhead was calibrated on CUDA.");
+        dim_wrapped("Metal build: verification loads the model on this Mac. The estimate's fixed overhead was "
+                    "calibrated on CUDA.");
 #endif
 #if defined(__APPLE__)
-        if (!sample) dim_wrapped("GPU telemetry unavailable: capacity and a real check are unknown.");
+        if (!sample)
+            dim_wrapped(
+                "No Metal memory reading. Verify for real still loads the model; the memory gap is not recorded.");
 #else
         if (!sample) dim_wrapped("NVML unavailable: capacity and a real check are unknown.");
 #endif
@@ -104,28 +115,30 @@ class VramView final : public View {
         const auto params = params_;
         checking_ = ctx.engine.submit([telemetry, store, params, estimated](EngineSession& session) {
             session.unload();
-            // Let NVML observe the free before taking the baseline.
+            // Let the probe observe memory before the baseline.
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
             auto before = telemetry->sample();
-#ifdef _WIN32
+#if !defined(__APPLE__)
             if (!before) throw Error("NVML sample unavailable before load");
-#else
-            if (!before) throw Error("GPU sample unavailable before load");
 #endif
             try {
                 session.load(params);
                 std::this_thread::sleep_for(std::chrono::milliseconds(200));
                 auto after = telemetry->sample();
-#ifdef _WIN32
+#if !defined(__APPLE__)
                 if (!after) throw Error("NVML sample unavailable after load");
-#else
-                if (!after) throw Error("GPU sample unavailable after load");
 #endif
                 VramCheck result;
                 result.model_path = path_utf8(params.model_path);
                 result.config = config_label(params);
                 result.estimated_gpu = estimated;
-                result.measured_gpu = after->vram_used > before->vram_used ? after->vram_used - before->vram_used : 0;
+                if (before && after) {
+                    result.measured_gpu =
+                        after->vram_used > before->vram_used ? after->vram_used - before->vram_used : 0;
+                } else {
+                    result.config += " (memory not measured)";
+                    result.measured_gpu = 0;
+                }
                 const auto now = std::time(nullptr);
                 std::tm utc{};
 #ifdef _WIN32
@@ -228,16 +241,23 @@ class VramView final : public View {
             history_path_ = path;
         }
         if (begin_card("##Checks")) {
+#if defined(__APPLE__)
+            card_title("Real checks",
+                       "When Metal reports memory, the figure is this process's allocation, not the whole machine.");
+#else
             card_title("Real checks", "NVML measures the whole GPU: other processes can move the result.");
+#endif
             if (last_check_ && last_check_->model_path == path) {
                 const auto& check = *last_check_;
                 char gap[32] = "—";
-                if (check.estimated_gpu)
+                const bool measured = memory_was_measured(check);
+                if (measured && check.estimated_gpu)
                     std::snprintf(gap, sizeof gap, "%+.1f %%",
                                   100 * (static_cast<double>(check.measured_gpu) / check.estimated_gpu - 1));
-                tile_grid({{"Last measurement", format_bytes(check.measured_gpu), "", col::teal},
-                           {"Gap, measured vs estimate", gap, "", col::amber}},
-                          em(11));
+                tile_grid(
+                    {{"Last measurement", measured ? format_bytes(check.measured_gpu) : "Not measured", "", col::teal},
+                     {"Gap, measured vs estimate", gap, "", col::amber}},
+                    em(11));
             }
             if (history_.empty())
                 dim_wrapped("No check recorded for this model.");
@@ -263,11 +283,16 @@ class VramView final : public View {
                     ImGui::TableNextColumn();
                     ImGui::TextUnformatted(format_bytes(check.estimated_gpu).c_str());
                     ImGui::TableNextColumn();
-                    ImGui::TextUnformatted(format_bytes(check.measured_gpu).c_str());
+                    if (memory_was_measured(check))
+                        ImGui::TextUnformatted(format_bytes(check.measured_gpu).c_str());
+                    else
+                        ImGui::TextUnformatted("Not measured");
                     ImGui::TableNextColumn();
-                    if (check.estimated_gpu)
+                    if (memory_was_measured(check) && check.estimated_gpu)
                         ImGui::Text("%+.1f %%",
                                     100 * (static_cast<double>(check.measured_gpu) / check.estimated_gpu - 1));
+                    else
+                        ImGui::TextUnformatted("—");
                 }
                 ImGui::EndTable();
             }
@@ -283,7 +308,7 @@ public:
     const char* subtitle() const override {
         return "Estimate the memory of a load before you run it, then check it with a real measurement.";
     }
-    const char* icon() const override { return ""; }
+    const char* icon() const override { return icon_vram; }
     void draw(AppContext& ctx) override {
         if (is_ready(reading_)) {
             try {
@@ -299,7 +324,10 @@ public:
             try {
                 last_check_ = checking_.get();
                 history_path_.clear();
-                ctx.notify("VRAM check saved");
+                if (last_check_ && !memory_was_measured(*last_check_))
+                    ctx.notify("Model loaded. GPU memory was not measured.");
+                else
+                    ctx.notify("VRAM check saved");
             } catch (const std::exception& e) {
                 ctx.notify(e.what(), true);
             }

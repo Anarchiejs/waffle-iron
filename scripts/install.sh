@@ -557,6 +557,36 @@ start_gui() {
     ok "Interface started: $exe"
 }
 
+vcpkg_baseline() {
+    sed -n 's/^[[:space:]]*"builtin-baseline"[[:space:]]*:[[:space:]]*"\([0-9a-fA-F][0-9a-fA-F]*\)".*/\1/p' \
+        "$ROOT/vcpkg.json" | head -n 1
+}
+
+ensure_vcpkg_baseline() {
+    local root=$1
+    local baseline
+    baseline=$(vcpkg_baseline)
+    [[ -n "$baseline" ]] || die "vcpkg.json has no builtin-baseline."
+    if [[ ! -d "$root/.git" ]]; then
+        warn "vcpkg at $root has no git metadata. A copied or shallow tree can miss baseline $baseline."
+        return 0
+    fi
+    if git -C "$root" cat-file -e "${baseline}^{commit}" 2>/dev/null; then
+        ok "vcpkg baseline $baseline"
+        return 0
+    fi
+    step "Fetching vcpkg baseline $baseline"
+    warn "A shallow vcpkg clone does not contain builtin-baseline. Fetching that commit."
+    if ! git -C "$root" fetch --depth=1 origin "$baseline"; then
+        git -C "$root" fetch origin "$baseline" || die "Could not fetch vcpkg baseline $baseline.
+Clone vcpkg without --depth:
+  git clone https://github.com/microsoft/vcpkg.git \"\$HOME/vcpkg\""
+    fi
+    git -C "$root" cat-file -e "${baseline}^{commit}" \
+        || die "vcpkg baseline $baseline is still missing after fetch."
+    ok "vcpkg baseline $baseline"
+}
+
 require_tools() {
     local -a problems=()
     if ! command -v git >/dev/null 2>&1; then
@@ -617,12 +647,25 @@ https://ninja-build.org/  (Debian/Ubuntu: ninja-build, macOS: brew install ninja
         vcpkg_root=$(dirname "$(command -v vcpkg)")
     fi
     if [[ -z "$vcpkg_root" || ! -f "$vcpkg_root/scripts/buildsystems/vcpkg.cmake" ]]; then
-        problems+=("vcpkg was not found (VCPKG_ROOT).
-  git clone https://github.com/microsoft/vcpkg \"\$HOME/vcpkg\"
+        if [[ -e "$HOME/vcpkg" ]]; then
+            problems+=("vcpkg was not found, and $HOME/vcpkg is not a usable checkout.
+Clone it without --depth (a shallow clone omits the builtin-baseline commit):
+  git clone https://github.com/microsoft/vcpkg.git \"\$HOME/vcpkg\"
   \"\$HOME/vcpkg/bootstrap-vcpkg.sh\" -disableMetrics
-  export VCPKG_ROOT=\"\$HOME/vcpkg\"
-Then run ./install.sh again.")
-    else
+  export VCPKG_ROOT=\"\$HOME/vcpkg\"")
+        elif ! command -v git >/dev/null 2>&1; then
+            problems+=("vcpkg was not found, and Git is required to clone it.")
+        else
+            step "Cloning vcpkg into $HOME/vcpkg (full history, not a shallow clone)"
+            if git clone --filter=blob:none https://github.com/microsoft/vcpkg.git "$HOME/vcpkg"; then
+                vcpkg_root=$HOME/vcpkg
+            else
+                problems+=("Could not clone vcpkg. Clone it yourself without --depth:
+  git clone https://github.com/microsoft/vcpkg.git \"\$HOME/vcpkg\"")
+            fi
+        fi
+    fi
+    if [[ -n "$vcpkg_root" && -f "$vcpkg_root/scripts/buildsystems/vcpkg.cmake" ]]; then
         export VCPKG_ROOT=$vcpkg_root
         ok "vcpkg : $vcpkg_root"
     fi
@@ -643,7 +686,29 @@ The command-line tool can be built without the interface: cmake --preset cpu-rel
         if [[ ${#missing_auto[@]} -gt 0 ]]; then
             problems+=("Autotools needed to build GLFW's X11 dependencies are missing: ${missing_auto[*]}.
 Debian/Ubuntu: sudo apt-get install autoconf autoconf-archive automake libtool pkg-config xutils-dev
-Fedora: sudo dnf install autoconf autoconf-archive automake libtool pkgconf xorg-x11-util-macros")
+Fedora: sudo dnf install autoconf autoconf-archive automake libtool pkgconf xorg-x11-util-macros
+Arch: sudo pacman -S base-devel pkgconf")
+        fi
+        if ! command -v zip >/dev/null 2>&1; then
+            problems+=("zip was not found. vcpkg's bootstrap script uses it.
+Debian/Ubuntu: sudo apt-get install zip
+Fedora: sudo dnf install zip
+Arch: sudo pacman -S zip")
+        fi
+        if command -v pkg-config >/dev/null 2>&1; then
+            local missing_x=()
+            local module
+            for module in xrandr xinerama xcursor xi xxf86vm glu; do
+                if ! pkg-config --exists "$module"; then
+                    missing_x+=("$module")
+                fi
+            done
+            if [[ ${#missing_x[@]} -gt 0 ]]; then
+                problems+=("GLFW's X11 dependencies are missing (${missing_x[*]}).
+Debian/Ubuntu: sudo apt-get install libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxxf86vm-dev libglu1-mesa-dev pkg-config
+Fedora: sudo dnf install libXrandr-devel libXinerama-devel libXcursor-devel libXi-devel libXxf86vm-devel mesa-libGLU-devel pkgconf
+Arch: sudo pacman -S libxrandr libxinerama libxcursor libxi libxxf86vm glu pkgconf")
+            fi
         fi
     fi
     if [[ ${#problems[@]} -gt 0 ]]; then
@@ -653,6 +718,15 @@ Fedora: sudo dnf install autoconf autoconf-archive automake libtool pkgconf xorg
             printf '%s\n\n' "$problem" >&2
         done
         die "Prerequisites are incomplete."
+    fi
+    if [[ -n "${VCPKG_ROOT:-}" && -x "$VCPKG_ROOT/vcpkg" ]]; then
+        :
+    elif [[ -n "${VCPKG_ROOT:-}" && -f "$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" ]]; then
+        step "Bootstrapping vcpkg"
+        "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
+    fi
+    if [[ -n "${VCPKG_ROOT:-}" ]]; then
+        ensure_vcpkg_baseline "$VCPKG_ROOT"
     fi
 }
 

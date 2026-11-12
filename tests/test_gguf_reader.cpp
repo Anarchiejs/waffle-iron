@@ -267,6 +267,22 @@ TEST_CASE("GGUF: Linux Ollama service library is a candidate", "[gguf_reader]") 
 }
 #endif
 
+TEST_CASE("GGUF: systemd Environment lines yield OLLAMA_MODELS", "[gguf_reader]") {
+    CHECK_FALSE(waffle::ollama_models_from_systemd_text("ExecStart=/usr/bin/ollama serve\n").has_value());
+    const auto plain = waffle::ollama_models_from_systemd_text(
+        "Environment=OLLAMA_HOST=127.0.0.1:11434\nEnvironment=OLLAMA_MODELS=/var/lib/ollama/models\n");
+    REQUIRE(plain.has_value());
+    CHECK(*plain == "/var/lib/ollama/models");
+    const auto quoted =
+        waffle::ollama_models_from_systemd_text("Environment=\"PATH=/usr/bin\" \"OLLAMA_MODELS=/opt/models\"\n");
+    REQUIRE(quoted.has_value());
+    CHECK(*quoted == "/opt/models");
+    const auto cleared =
+        waffle::ollama_models_from_systemd_text("Environment=OLLAMA_MODELS=/first\nEnvironment=OLLAMA_MODELS=\n");
+    REQUIRE(cleared.has_value());
+    CHECK(cleared->empty());
+}
+
 TEST_CASE("GGUF: optional real model", "[gguf_reader]") {
     WAFFLE_REQUIRE_MODEL(path);
     const auto model = waffle::read_gguf(path);

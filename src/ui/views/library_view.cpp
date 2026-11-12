@@ -1,3 +1,4 @@
+#include "ui/icons.hpp"
 #include "ui/view.hpp"
 #include "ui/theme.hpp"
 #include "ui/widgets.hpp"
@@ -30,7 +31,7 @@ public:
     bool rescan = false;
     const char* title() const override { return "Library"; }
     const char* subtitle() const override { return "Your GGUF models: metadata, weight layout, tags, and notes."; }
-    const char* icon() const override { return ""; }
+    const char* icon() const override { return icon_library; }
     // Indexes the known folders from the first frame, even when this page is not shown.
     void tick(AppContext& ctx) override {
         if (!initialized_) {

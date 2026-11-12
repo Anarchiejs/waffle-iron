@@ -13,7 +13,7 @@ public:
     virtual const char* title() const = 0;                    // page name (navigation and header), unique and stable
     virtual const char* subtitle() const = 0;                 // one sentence under the page title
     virtual const char* nav_title() const { return title(); } // short sidebar label
-    virtual const char* icon() const = 0; // Lucide glyph (UTF-8), or "" when the icon font is missing
+    virtual const char* icon() const = 0; // Lucide glyph (UTF-8). Drawn only when the icon font loaded.
     // Draws the page into the area App reserves for it (under the header).
     virtual void draw(AppContext& ctx) = 0;
     // Background work, every frame, even when the page is not shown.

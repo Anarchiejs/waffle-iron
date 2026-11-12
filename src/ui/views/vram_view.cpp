@@ -84,10 +84,17 @@ class VramView final : public View {
         ImGui::Dummy({0, em(.1f)});
         push_font(nullptr, .88f);
         dim_wrapped("Verification unloads the current model, measures one isolated load, then unloads it.");
-#ifndef WAFFLE_HAS_CUDA
+#if !defined(WAFFLE_HAS_CUDA) && !defined(WAFFLE_HAS_METAL)
         dim_wrapped("CPU build: the load uses the CPU; the measurement does not validate a CUDA estimate.");
+#elif defined(WAFFLE_HAS_METAL)
+        dim_wrapped(
+            "Metal build: verification measures this Mac. The estimate's fixed overhead was calibrated on CUDA.");
 #endif
+#if defined(__APPLE__)
+        if (!sample) dim_wrapped("GPU telemetry unavailable: capacity and a real check are unknown.");
+#else
         if (!sample) dim_wrapped("NVML unavailable: capacity and a real check are unknown.");
+#endif
         ImGui::PopFont();
         return &model;
     }
@@ -100,12 +107,20 @@ class VramView final : public View {
             // Let NVML observe the free before taking the baseline.
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
             auto before = telemetry->sample();
+#ifdef _WIN32
             if (!before) throw Error("NVML sample unavailable before load");
+#else
+            if (!before) throw Error("GPU sample unavailable before load");
+#endif
             try {
                 session.load(params);
                 std::this_thread::sleep_for(std::chrono::milliseconds(200));
                 auto after = telemetry->sample();
+#ifdef _WIN32
                 if (!after) throw Error("NVML sample unavailable after load");
+#else
+                if (!after) throw Error("GPU sample unavailable after load");
+#endif
                 VramCheck result;
                 result.model_path = path_utf8(params.model_path);
                 result.config = config_label(params);
@@ -113,7 +128,11 @@ class VramView final : public View {
                 result.measured_gpu = after->vram_used > before->vram_used ? after->vram_used - before->vram_used : 0;
                 const auto now = std::time(nullptr);
                 std::tm utc{};
+#ifdef _WIN32
                 gmtime_s(&utc, &now);
+#else
+                gmtime_r(&now, &utc);
+#endif
                 char date[32];
                 std::strftime(date, sizeof date, "%Y-%m-%dT%H:%M:%SZ", &utc);
                 result.timestamp = date;

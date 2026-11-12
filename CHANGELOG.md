@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Linux and macOS builds beside Windows. CPU presets on all three, CUDA on Windows and Linux, Metal on macOS.
+- GLFW and OpenGL interface on Linux and macOS. The Windows interface stays on DirectX 11.
+- Model folders follow `$HOME` on Linux and macOS, plus the Ollama systemd library on Linux. The library database uses XDG on Linux and Application Support on macOS.
+- `install.sh`, `launch.sh`, and `scripts/dev.sh` next to the Windows scripts. CI builds and tests `cpu-release` on Linux and macOS as well as Windows.
+
 ## 0.1.0
 
 - Windows workbench for local GGUF models: library, VRAM planner, bench, sampler lab, comparator, and GPU monitor, plus the `waffle` command line.

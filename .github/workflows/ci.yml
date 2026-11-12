@@ -58,3 +58,87 @@ jobs:
 
       - name: Test
         run: ctest --preset cpu-release
+
+  cpu-linux:
+    name: Linux CPU
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          submodules: recursive
+
+      - name: Build packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build pkg-config \
+            autoconf autoconf-archive automake libtool xutils-dev \
+            libgl1-mesa-dev libx11-dev libxrandr-dev libxinerama-dev \
+            libxcursor-dev libxi-dev libxext-dev
+
+      - name: vcpkg
+        run: |
+          git clone --filter=blob:none https://github.com/microsoft/vcpkg.git "$RUNNER_TEMP/vcpkg"
+          git -C "$RUNNER_TEMP/vcpkg" fetch --depth 1 origin 0e5030f583a5427123cd3b714255e5ae62faa3ba
+          git -C "$RUNNER_TEMP/vcpkg" checkout --detach FETCH_HEAD
+          "$RUNNER_TEMP/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
+          echo "VCPKG_ROOT=$RUNNER_TEMP/vcpkg" >> "$GITHUB_ENV"
+
+      - name: Installer selection
+        run: bash scripts/install.sh --auto-test
+
+      - name: vcpkg binary cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: vcpkg_installed
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+
+      - name: Configure
+        run: cmake --preset cpu-release
+
+      - name: Build
+        run: cmake --build --preset cpu-release --parallel 4
+
+      - name: Test
+        run: ctest --preset cpu-release
+
+  cpu-macos:
+    name: macOS CPU
+    runs-on: macos-latest
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          submodules: recursive
+
+      - name: Build tools
+        run: |
+          if ! command -v ninja >/dev/null 2>&1; then brew install ninja; fi
+          if ! command -v cmake >/dev/null 2>&1; then brew install cmake; fi
+
+      - name: vcpkg
+        run: |
+          git clone --filter=blob:none https://github.com/microsoft/vcpkg.git "$RUNNER_TEMP/vcpkg"
+          git -C "$RUNNER_TEMP/vcpkg" fetch --depth 1 origin 0e5030f583a5427123cd3b714255e5ae62faa3ba
+          git -C "$RUNNER_TEMP/vcpkg" checkout --detach FETCH_HEAD
+          "$RUNNER_TEMP/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
+          echo "VCPKG_ROOT=$RUNNER_TEMP/vcpkg" >> "$GITHUB_ENV"
+
+      - name: Installer selection
+        run: bash scripts/install.sh --auto-test
+
+      - name: vcpkg binary cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: vcpkg_installed
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+
+      - name: Configure
+        run: cmake --preset cpu-release
+
+      - name: Build
+        run: cmake --build --preset cpu-release --parallel 4
+
+      - name: Test
+        run: ctest --preset cpu-release

@@ -85,11 +85,21 @@ public:
     void draw(AppContext& ctx) override {
         if (!ctx.telemetry.available()) {
             if (begin_card("##nvml")) {
+#if defined(__APPLE__)
+                card_title("GPU telemetry unavailable");
+#else
                 card_title("NVML unavailable");
+#endif
                 dim_wrapped((ctx.telemetry.error() + ". GPU measurements are not available.").c_str());
             }
             end_card();
         }
+#if defined(__APPLE__)
+        else {
+            dim_wrapped("Metal reports the device name and this process's allocation against the recommended working "
+                        "set. Utilization, temperature, power, and SM clock are NVML readings and stay at zero.");
+        }
+#endif
         // History window: segmented buttons.
         ImGui::AlignTextToFramePadding();
         ImGui::TextDisabled("Window");

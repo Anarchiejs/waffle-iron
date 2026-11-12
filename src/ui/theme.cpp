@@ -1,13 +1,14 @@
 #include "ui/theme.hpp"
 #include <implot.h>
 #include <cstdlib>
+#include <vector>
 namespace waffle::ui {
 namespace {
 Fonts g_fonts;
-// First existing file among the candidates (assets, then Windows fonts).
-std::filesystem::path first_existing(std::initializer_list<std::filesystem::path> candidates) {
+// First existing file among the candidates (assets, then platform fonts).
+std::filesystem::path first_existing(const std::vector<std::filesystem::path>& candidates) {
     for (const auto& p : candidates)
-        if (std::filesystem::exists(p)) return p;
+        if (!p.empty() && std::filesystem::exists(p)) return p;
     return {};
 }
 std::filesystem::path windows_fonts() {
@@ -105,14 +106,39 @@ bool apply_theme(float dpi, const std::filesystem::path& assets) {
     ps.Colors[ImPlotCol_AxisGrid] = {1, 1, 1, 0.06f};
     ps.Colors[ImPlotCol_AxisTick] = {1, 1, 1, 0.10f};
 
-    // Fonts: Inter from assets when present, otherwise Segoe UI shipped with Windows; Cascadia Mono / Consolas for
-    // monospace.
+    // Fonts: Inter from assets when present, otherwise a platform UI font, then ImGui's built-in font.
+    // Windows: Segoe UI, Cascadia Mono / Consolas. Linux: DejaVu or Liberation. macOS: Arial / Courier New.
     auto& io = ImGui::GetIO();
     const float size = 15.5f * dpi;
     const auto win = windows_fonts();
-    const auto regular = first_existing({assets / "fonts/Inter-Regular.ttf", win / "segoeui.ttf"});
-    const auto semibold = first_existing({assets / "fonts/Inter-SemiBold.ttf", win / "seguisb.ttf"});
-    const auto mono = first_existing({win / "CascadiaMono.ttf", win / "consola.ttf"});
+    std::vector<std::filesystem::path> regular_fonts = {assets / "fonts/Inter-Regular.ttf", win / "segoeui.ttf"};
+    std::vector<std::filesystem::path> semibold_fonts = {assets / "fonts/Inter-SemiBold.ttf", win / "seguisb.ttf"};
+    std::vector<std::filesystem::path> mono_fonts = {win / "CascadiaMono.ttf", win / "consola.ttf"};
+#if defined(__APPLE__)
+    regular_fonts.insert(regular_fonts.end(),
+                         {"/System/Library/Fonts/Supplemental/Arial.ttf", "/Library/Fonts/Arial.ttf"});
+    semibold_fonts.insert(semibold_fonts.end(),
+                          {"/System/Library/Fonts/Supplemental/Arial Bold.ttf", "/Library/Fonts/Arial Bold.ttf"});
+    mono_fonts.insert(mono_fonts.end(),
+                      {"/System/Library/Fonts/Supplemental/Courier New.ttf", "/Library/Fonts/Courier New.ttf"});
+#elif !defined(_WIN32)
+    regular_fonts.insert(regular_fonts.end(),
+                         {"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+                          "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+                          "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+                          "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"});
+    semibold_fonts.insert(semibold_fonts.end(), {"/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                                                 "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
+                                                 "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+                                                 "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf"});
+    mono_fonts.insert(mono_fonts.end(), {"/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+                                         "/usr/share/fonts/dejavu/DejaVuSansMono.ttf",
+                                         "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
+                                         "/usr/share/fonts/truetype/liberation2/LiberationMono-Regular.ttf"});
+#endif
+    const auto regular = first_existing(regular_fonts);
+    const auto semibold = first_existing(semibold_fonts);
+    const auto mono = first_existing(mono_fonts);
     if (!regular.empty()) g_fonts.regular = io.Fonts->AddFontFromFileTTF(regular.string().c_str(), size);
     if (!g_fonts.regular) {
         ImFontConfig cfg;

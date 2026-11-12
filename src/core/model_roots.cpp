@@ -28,6 +28,17 @@ std::string ollama_tag(const std::filesystem::path& relative) {
     return tag;
 }
 
+std::filesystem::path profile_directory() {
+#ifdef _WIN32
+    if (const auto* home = std::getenv("USERPROFILE"); home && *home) return std::filesystem::path(home);
+    return {};
+#else
+    // Unix sessions use HOME. USERPROFILE is a Windows variable and is ignored here.
+    if (const auto* home = std::getenv("HOME"); home && *home) return std::filesystem::path(home);
+    return {};
+#endif
+}
+
 } // namespace
 
 std::optional<OllamaBlob> find_ollama_blob(const std::filesystem::path& path) {
@@ -67,13 +78,16 @@ std::optional<OllamaBlob> find_ollama_blob(const std::filesystem::path& path) {
 
 std::vector<std::filesystem::path> candidate_model_roots() {
     std::vector<std::filesystem::path> result;
-    if (const auto* home = std::getenv("USERPROFILE"); home && *home) {
-        const auto base = std::filesystem::path(home);
+    if (const auto base = profile_directory(); !base.empty()) {
         add_unique(result, base / "models");
         add_unique(result, base / ".ollama" / "models" / "blobs");
         add_unique(result, base / ".lmstudio" / "models");
         add_unique(result, base / ".cache" / "lm-studio" / "models");
     }
+#if !defined(_WIN32) && !defined(__APPLE__)
+    // Official Ollama systemd install: the service user is "ollama" and its home is this directory.
+    add_unique(result, "/usr/share/ollama/.ollama/models/blobs");
+#endif
     if (const auto* ollama = std::getenv("OLLAMA_MODELS"); ollama && *ollama) {
         const auto root = std::filesystem::path(ollama);
         std::error_code ec;

@@ -199,6 +199,7 @@ std::vector<std::string> command_line() {
 #endif
 }
 
+#ifdef _WIN32
 const char* kGeneralHelp = R"HELP(waffle — local GGUF model workbench
 
 Usage: waffle [--db PATH] COMMAND [options]
@@ -220,6 +221,51 @@ Commands:
 MODEL is a file path or a unique substring of the name in the database.
 waffle COMMAND --help   Help for that command.
 )HELP";
+#elif defined(__APPLE__)
+const char* kGeneralHelp = R"HELP(waffle — local GGUF model workbench
+
+Usage: waffle [--db PATH] COMMAND [options]
+
+Commands:
+  scan [folders...]   Record GGUF files found (default model folders otherwise)
+  list                Library: name, quantization, size, parameters, context, path
+  info MODEL          Main metadata and bytes by type
+  plan MODEL          VRAM estimate and how many GPU layers fit
+  bench MODEL         Speed measurement, settings grid, save
+  history MODEL       Measurement history for this model
+  campaigns           Saved campaigns
+  export ID           Export a campaign (--md by default, or --csv)
+  gpu                 One GPU telemetry sample
+
+  --db PATH           SQLite database (default: ~/Library/Application Support/WaffleIron/waffle.db)
+  --help              This help
+
+MODEL is a file path or a unique substring of the name in the database.
+waffle COMMAND --help   Help for that command.
+)HELP";
+#else
+const char* kGeneralHelp = R"HELP(waffle — local GGUF model workbench
+
+Usage: waffle [--db PATH] COMMAND [options]
+
+Commands:
+  scan [folders...]   Record GGUF files found (default model folders otherwise)
+  list                Library: name, quantization, size, parameters, context, path
+  info MODEL          Main metadata and bytes by type
+  plan MODEL          VRAM estimate and how many GPU layers fit
+  bench MODEL         Speed measurement, settings grid, save
+  history MODEL       Measurement history for this model
+  campaigns           Saved campaigns
+  export ID           Export a campaign (--md by default, or --csv)
+  gpu                 One GPU telemetry sample
+
+  --db PATH           SQLite database (default: $XDG_DATA_HOME/WaffleIron/waffle.db or ~/.local/share/WaffleIron/waffle.db)
+  --help              This help
+
+MODEL is a file path or a unique substring of the name in the database.
+waffle COMMAND --help   Help for that command.
+)HELP";
+#endif
 
 const char* kScanHelp = "waffle scan [folders...]\n\nWalks the folders (or the default model folders) and records each "
                         "GGUF.\n";
@@ -258,7 +304,12 @@ const char* kExportHelp = R"HELP(waffle export ID [options]
   --csv              CSV
   -o FILE            Write a file instead of standard output
 )HELP";
+#ifdef __APPLE__
+const char* kGpuHelp = "waffle gpu\n\nPrints one Metal memory sample, or why telemetry is unavailable.\n"
+                       "Utilization, temperature, power, and clock are NVIDIA NVML readings and stay at zero.\n";
+#else
 const char* kGpuHelp = "waffle gpu\n\nPrints one NVML sample, or why telemetry is unavailable.\n";
+#endif
 
 struct Invocation {
     std::optional<std::filesystem::path> db;

@@ -41,6 +41,27 @@ bool has_root(const std::vector<std::filesystem::path>& roots, const std::filesy
         if (root.lexically_normal() == wanted) return true;
     return false;
 }
+
+int roots_under(const std::vector<std::filesystem::path>& roots, const std::filesystem::path& base) {
+    const auto prefix = base.lexically_normal().generic_string();
+    int count = 0;
+    for (const auto& root : roots) {
+        const auto text = root.lexically_normal().generic_string();
+        if (text == prefix || text.starts_with(prefix + "/")) ++count;
+    }
+    return count;
+}
+
+// Windows reads USERPROFILE. Linux and macOS read HOME.
+struct ProfileOverride {
+#ifdef _WIN32
+    EnvOverride env;
+    explicit ProfileOverride(const std::filesystem::path& path) : env("USERPROFILE", path.string()) {}
+#else
+    EnvOverride env;
+    explicit ProfileOverride(const std::filesystem::path& path) : env("HOME", path.string()) {}
+#endif
+};
 } // namespace
 
 namespace waffle::test {
@@ -181,7 +202,7 @@ TEST_CASE("GGUF: default model folders", "[gguf_reader]") {
     std::filesystem::create_directories(temp.path / ".ollama" / "models" / "blobs");
     std::filesystem::create_directories(temp.path / ".lmstudio" / "models");
     std::filesystem::create_directories(temp.path / "custom-ollama" / "blobs");
-    EnvOverride profile("USERPROFILE", temp.path.string());
+    ProfileOverride profile(temp.path);
     EnvOverride ollama("OLLAMA_MODELS", (temp.path / "custom-ollama").string());
 
     const auto candidates = waffle::candidate_model_roots();
@@ -197,13 +218,16 @@ TEST_CASE("GGUF: default model folders", "[gguf_reader]") {
     CHECK(has_root(roots, temp.path / ".lmstudio" / "models"));
     CHECK(has_root(roots, temp.path / "custom-ollama" / "blobs"));
     CHECK_FALSE(has_root(roots, temp.path / ".cache" / "lm-studio" / "models"));
+    CHECK(roots_under(roots, temp.path) == 4);
+#ifdef _WIN32
     CHECK(roots.size() == 4);
+#endif
 }
 
 TEST_CASE("GGUF: OLLAMA_MODELS does not duplicate the default folder", "[gguf_reader]") {
     waffle::test::TempDir temp("roots_dedup");
     std::filesystem::create_directories(temp.path / ".ollama" / "models" / "blobs");
-    EnvOverride profile("USERPROFILE", temp.path.string());
+    ProfileOverride profile(temp.path);
     EnvOverride ollama("OLLAMA_MODELS", (temp.path / ".ollama" / "models").string());
     const auto roots = waffle::default_model_roots();
     int blobs = 0;
@@ -215,12 +239,33 @@ TEST_CASE("GGUF: OLLAMA_MODELS does not duplicate the default folder", "[gguf_re
 TEST_CASE("GGUF: OLLAMA_MODELS without a blobs subfolder", "[gguf_reader]") {
     waffle::test::TempDir temp("roots_flat");
     std::filesystem::create_directories(temp.path / "flat-models");
-    EnvOverride profile("USERPROFILE", temp.path.string());
+    ProfileOverride profile(temp.path);
     EnvOverride ollama("OLLAMA_MODELS", (temp.path / "flat-models").string());
     const auto roots = waffle::default_model_roots();
     CHECK(has_root(roots, temp.path / "flat-models"));
     CHECK_FALSE(has_root(roots, temp.path / "flat-models" / "blobs"));
 }
+
+#ifndef _WIN32
+TEST_CASE("GGUF: HOME is the profile and USERPROFILE is ignored", "[gguf_reader]") {
+    waffle::test::TempDir home("roots_home");
+    waffle::test::TempDir other("roots_userprofile");
+    std::filesystem::create_directories(home.path / "models");
+    std::filesystem::create_directories(other.path / "models");
+    ProfileOverride profile(home.path);
+    EnvOverride windows_only("USERPROFILE", other.path.string());
+    const auto roots = waffle::default_model_roots();
+    CHECK(has_root(roots, home.path / "models"));
+    CHECK_FALSE(has_root(roots, other.path / "models"));
+}
+#endif
+
+#if !defined(_WIN32) && !defined(__APPLE__)
+TEST_CASE("GGUF: Linux Ollama service library is a candidate", "[gguf_reader]") {
+    const auto candidates = waffle::candidate_model_roots();
+    CHECK(has_root(candidates, "/usr/share/ollama/.ollama/models/blobs"));
+}
+#endif
 
 TEST_CASE("GGUF: optional real model", "[gguf_reader]") {
     WAFFLE_REQUIRE_MODEL(path);

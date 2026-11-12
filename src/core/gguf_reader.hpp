@@ -17,10 +17,14 @@ bool is_gguf_file(const std::filesystem::path& path);
 // but still fills n_params and bytes_by_type. Throws waffle::Error if the file is unreadable.
 ModelInfo read_gguf(const std::filesystem::path& path, bool with_tensors = true);
 
-// Known locations, even if they do not exist yet:
-// %USERPROFILE%\models, %USERPROFILE%\.ollama\models\blobs, %USERPROFILE%\.lmstudio\models,
-// %USERPROFILE%\.cache\lm-studio\models, and the blobs directory of OLLAMA_MODELS when set
-// (or OLLAMA_MODELS itself when it has no blobs subdirectory).
+// Known locations, even if they do not exist yet.
+// The profile directory is %USERPROFILE% on Windows and $HOME on Linux and macOS:
+//   <profile>/models
+//   <profile>/.ollama/models/blobs
+//   <profile>/.lmstudio/models
+//   <profile>/.cache/lm-studio/models
+// Linux also lists the Ollama service library /usr/share/ollama/.ollama/models/blobs.
+// OLLAMA_MODELS contributes its blobs directory, or OLLAMA_MODELS itself when it has no blobs subdirectory.
 std::vector<std::filesystem::path> candidate_model_roots();
 
 // Subset of candidate_model_roots() whose directory exists on this machine.

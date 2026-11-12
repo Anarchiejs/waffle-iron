@@ -8,6 +8,8 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#elif defined(__APPLE__)
+#include "core/telemetry_metal.hpp"
 #else
 #include <dlfcn.h>
 #endif
@@ -49,6 +51,7 @@ struct Telemetry::Impl {
     NvmlApi api;
     nvmlDevice_t device = nullptr;
     bool ok = false;
+    bool apple_metal = false;
     std::string name;
     std::string error;
     std::mutex mutex;
@@ -68,11 +71,25 @@ struct Telemetry::Impl {
     }
 
     void open() {
-#ifdef _WIN32
+#if defined(__APPLE__)
+        MetalProbe probe;
+        if (!metal_gpu_probe(probe)) {
+            error = probe.error.empty() ? "No Metal GPU found" : probe.error;
+            return;
+        }
+        name = probe.name;
+        apple_metal = true;
+        ok = true;
+        return;
+#elif defined(_WIN32)
         lib = LoadLibraryA("nvml.dll");
         if (!lib) lib = LoadLibraryA("C:\\Program Files\\NVIDIA Corporation\\NVSMI\\nvml.dll");
 #else
         lib = dlopen("libnvidia-ml.so.1", RTLD_NOW);
+        if (!lib) lib = dlopen("libnvidia-ml.so", RTLD_NOW);
+        if (!lib) lib = dlopen("/usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1", RTLD_NOW);
+        if (!lib) lib = dlopen("/usr/lib64/libnvidia-ml.so.1", RTLD_NOW);
+        if (!lib) lib = dlopen("/usr/lib/wsl/lib/libnvidia-ml.so.1", RTLD_NOW);
 #endif
         if (!lib) {
             error = "NVML not found (NVIDIA driver missing?)";
@@ -103,8 +120,9 @@ struct Telemetry::Impl {
     }
 
     void close() {
-        if (ok) api.shutdown();
+        if (ok && api.shutdown) api.shutdown();
         ok = false;
+        apple_metal = false;
 #ifdef _WIN32
         if (lib) FreeLibrary(static_cast<HMODULE>(lib));
 #else
@@ -133,6 +151,18 @@ std::string Telemetry::error() const {
 
 std::optional<GpuSample> Telemetry::sample() {
     if (!impl_->ok) return std::nullopt;
+#if defined(__APPLE__)
+    if (impl_->apple_metal) {
+        std::lock_guard lock(impl_->mutex);
+        MetalProbe probe;
+        if (!metal_gpu_probe(probe)) return std::nullopt;
+        GpuSample s;
+        s.t_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - impl_->t0).count();
+        s.vram_used = probe.used;
+        s.vram_total = probe.total;
+        return s;
+    }
+#endif
     std::lock_guard lock(impl_->mutex);
     auto& api = impl_->api;
     GpuSample s;

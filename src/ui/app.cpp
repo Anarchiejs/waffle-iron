@@ -55,7 +55,13 @@ void draw_nav_icon(ImDrawList* dl, int page, ImVec2 c, float s, ImU32 color) {
         }
     }
 }
-bool nav_item(int page, const char* label, bool active, bool compact) {
+void draw_font_icon(ImDrawList* dl, const char* glyph, ImVec2 center, float size, ImU32 color) {
+    ImFont* font = fonts().regular;
+    if (!font || !glyph || !glyph[0]) return;
+    const ImVec2 text = font->CalcTextSizeA(size, FLT_MAX, 0, glyph);
+    dl->AddText(font, size, {center.x - text.x * .5f, center.y - text.y * .5f}, color, glyph);
+}
+bool nav_item(int page, const char* label, const char* glyph, bool use_font, bool active, bool compact) {
     const float w = ImGui::GetContentRegionAvail().x;
     const float h = em(2.35f);
     const ImVec2 pos = ImGui::GetCursorScreenPos();
@@ -71,13 +77,17 @@ bool nav_item(int page, const char* label, bool active, bool compact) {
     } else if (hovered)
         dl->AddRectFilled(pos, {pos.x + w, pos.y + h}, ImGui::GetColorU32(ImVec4(1, 1, 1, .045f)), em(.45f));
     const ImU32 icon = ImGui::GetColorU32(active ? col::accent : hovered ? col::text : col::dim);
+    const ImVec2 icon_center =
+        compact ? ImVec2{pos.x + w * .5f + em(.1f), pos.y + h * .5f} : ImVec2{pos.x + em(1.35f), pos.y + h * .5f};
+    if (use_font && glyph && glyph[0])
+        draw_font_icon(dl, glyph, icon_center, em(compact ? 1.15f : 1.05f), icon);
+    else
+        draw_nav_icon(dl, page, icon_center, em(compact ? 1.05f : 1.0f), icon);
     if (compact) {
         // Narrow bar: icon only, label in a tooltip.
-        draw_nav_icon(dl, page, {pos.x + w * .5f + em(.1f), pos.y + h * .5f}, em(1.05f), icon);
         if (hovered) ImGui::SetTooltip("%s  (Ctrl+%d)", label, page + 1);
         return clicked;
     }
-    draw_nav_icon(dl, page, {pos.x + em(1.35f), pos.y + h * .5f}, em(1.0f), icon);
     ImFont* font = active ? fonts().semibold : fonts().regular;
     const float fs = em(1.0f);
     dl->AddText(font, fs, {pos.x + em(2.55f), pos.y + (h - fs) * .5f - 1},
@@ -141,8 +151,10 @@ void App::sidebar(float width, float height, bool compact) {
         section_header("TOOLS");
     }
     ImGui::Dummy({0, em(.05f)});
-    for (int i = 0; i < static_cast<int>(views_.size()); ++i)
-        if (nav_item(i, views_[static_cast<size_t>(i)]->nav_title(), i == page_, compact)) page_ = i;
+    for (int i = 0; i < static_cast<int>(views_.size()); ++i) {
+        const auto& view = *views_[static_cast<size_t>(i)];
+        if (nav_item(i, view.nav_title(), view.icon(), icons_, i == page_, compact)) page_ = i;
+    }
     if (compact) {
         // A small VRAM meter at the foot of the bar.
         if (!ctx_.gpu_history.empty()) {
@@ -201,7 +213,15 @@ void App::sidebar(float width, float height, bool compact) {
             ImGui::PopFont();
         } else {
             push_font(nullptr, .84f);
-            dim_wrapped(telemetry_.available() ? "Sampling..." : "NVML unavailable");
+            const char* status = "Sampling...";
+            if (!telemetry_.available()) {
+#if defined(__APPLE__)
+                status = "GPU telemetry unavailable";
+#else
+                status = "NVML unavailable";
+#endif
+            }
+            dim_wrapped(status);
             ImGui::PopFont();
         }
         ImGui::EndChild();

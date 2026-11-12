@@ -11,8 +11,10 @@
       "platform": "windows"
     },
     {
-      "name": "implot",
-      "platform": "windows"
-    }
+      "name": "imgui",
+      "features": ["glfw-binding", "opengl3-binding"],
+      "platform": "!windows"
+    },
+    "implot"
   ]
 }

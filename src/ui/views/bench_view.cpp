@@ -296,6 +296,7 @@ class BenchView final : public View {
             if (ImGui::IsItemHovered()) ImGui::SetTooltip(kind ? "Export as Markdown" : "Export as CSV");
         }
         std::vector<std::string> full;
+        full.reserve(output_.results.size());
         for (const auto& r : output_.results) full.push_back(config_label(r.config));
         const auto split = split_labels(full);
         if (!split.common.empty()) {
@@ -352,6 +353,14 @@ class BenchView final : public View {
         std::vector<double> xp, xt, pp, tg, ep, et;
         std::vector<std::string> labels;
         std::vector<const char*> ticks;
+        xp.reserve(output_.results.size());
+        xt.reserve(output_.results.size());
+        pp.reserve(output_.results.size());
+        tg.reserve(output_.results.size());
+        ep.reserve(output_.results.size());
+        et.reserve(output_.results.size());
+        labels.reserve(output_.results.size());
+        ticks.reserve(output_.results.size());
         for (size_t i = 0; i < output_.results.size(); ++i) {
             const auto& r = output_.results[i];
             xp.push_back(static_cast<double>(i) - .18);
@@ -502,6 +511,7 @@ class BenchView final : public View {
         std::map<std::string, std::vector<size_t>> groups;
         for (size_t i = 0; i < history_.size(); ++i) groups[history_[i].config].push_back(i);
         std::vector<std::string> configs;
+        configs.reserve(groups.size());
         for (const auto& group : groups) configs.push_back(group.first);
         const auto names = split_labels(configs); // short legend: only what changes
         if (ImPlot::BeginPlot("##History", ImVec2(-1, std::max(em(12), ImGui::GetContentRegionAvail().y)),

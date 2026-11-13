@@ -52,19 +52,19 @@ std::vector<DiffSpan> word_diff(std::string_view left, std::string_view right) {
     }
     while (i > 0 && j > 0) {
         if (a[i - 1] == b[j - 1]) {
-            raw.push_back({DiffOp::Equal, a[i - 1]});
+            raw.emplace_back(DiffOp::Equal, a[i - 1]);
             --i;
             --j;
         } else if (at(i - 1, j) >= at(i, j - 1)) {
-            raw.push_back({DiffOp::Delete, a[i - 1]});
+            raw.emplace_back(DiffOp::Delete, a[i - 1]);
             --i;
         } else {
-            raw.push_back({DiffOp::Insert, b[j - 1]});
+            raw.emplace_back(DiffOp::Insert, b[j - 1]);
             --j;
         }
     }
-    while (i > 0) raw.push_back({DiffOp::Delete, a[--i]});
-    while (j > 0) raw.push_back({DiffOp::Insert, b[--j]});
+    while (i > 0) raw.emplace_back(DiffOp::Delete, a[--i]);
+    while (j > 0) raw.emplace_back(DiffOp::Insert, b[--j]);
     std::vector<DiffSpan> out;
     for (auto it = raw.rbegin(); it != raw.rend(); ++it) {
         if (!out.empty() && out.back().op == it->first)

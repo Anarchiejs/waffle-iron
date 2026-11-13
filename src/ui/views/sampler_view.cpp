@@ -260,7 +260,7 @@ class SamplerView final : public View {
             const ImU32 color = probability_color((*it)->p_final);
             const auto& piece = (*it)->piece;
             for (size_t i = 0; i < piece.size();) {
-                unsigned char c = static_cast<unsigned char>(piece[i]);
+                const auto c = static_cast<unsigned char>(piece[i]);
                 size_t bytes = c < 0x80 ? 1 : c < 0xe0 ? 2 : c < 0xf0 ? 3 : 4;
                 bytes = std::min(bytes, piece.size() - i);
                 const char* begin = piece.data() + i;
@@ -417,8 +417,10 @@ public:
         }
         if (ImGui::SmallButton("Export JSON")) {
             std::vector<Json> nodes;
+            nodes.reserve(snapshot_.nodes.size());
             for (const auto& n : snapshot_.nodes) {
                 std::vector<Json> children;
+                children.reserve(n.children.size());
                 for (int child : n.children) children.push_back(Json::number_value(child));
                 nodes.push_back(Json::object_value({
                     {"id", Json::number_value(n.id)},

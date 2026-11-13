@@ -22,7 +22,7 @@
 struct llama_model;
 struct llama_context;
 struct llama_vocab;
-typedef int32_t llama_token;
+using llama_token = int32_t;
 
 namespace waffle {
 
@@ -84,11 +84,12 @@ public:
 
     DeviceMemory device_memory() const; // GPU 0 via ggml_backend_dev_memory
 
+    EngineSession(const EngineSession&) = delete;
+    EngineSession& operator=(const EngineSession&) = delete;
+
 private:
     friend class Engine;
     EngineSession() = default;
-    EngineSession(const EngineSession&) = delete;
-    EngineSession& operator=(const EngineSession&) = delete;
 
     llama_model* model_ = nullptr;
     llama_context* ctx_ = nullptr;
@@ -141,7 +142,7 @@ private:
         std::stop_source stop;
     };
     void enqueue(Job job);
-    void run(std::stop_token thread_stop);
+    void run(const std::stop_token& thread_stop);
 
     mutable std::mutex mutex_;
     std::condition_variable_any cv_;

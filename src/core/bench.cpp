@@ -298,6 +298,7 @@ Json stats_json(const Stats& stats) {
     fields.emplace("min", Json::number_value(stats.min));
     fields.emplace("max", Json::number_value(stats.max));
     std::vector<Json> outliers;
+    outliers.reserve(stats.outliers.size());
     for (int index : stats.outliers) outliers.push_back(Json::number_value(index));
     fields.emplace("outliers", Json::array_value(std::move(outliers)));
     return Json::object_value(std::move(fields));

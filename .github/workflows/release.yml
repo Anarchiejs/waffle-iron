@@ -52,7 +52,7 @@ jobs:
         with:
           path: vcpkg_installed
           key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
-      - run: cmake --preset cpu-release
+      - run: cmake --preset cpu-release -DGGML_NATIVE=OFF
       - run: cmake --build --preset cpu-release --parallel 4
       - run: ctest --preset cpu-release
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -96,7 +96,7 @@ jobs:
         with:
           path: vcpkg_installed
           key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
-      - run: cmake --preset cpu-release
+      - run: cmake --preset cpu-release -DGGML_NATIVE=OFF
       - run: cmake --build --preset cpu-release --parallel 4
       - run: ctest --preset cpu-release
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -135,7 +135,7 @@ jobs:
         with:
           path: vcpkg_installed
           key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
-      - run: cmake --preset cpu-release
+      - run: cmake --preset cpu-release -DGGML_NATIVE=OFF
       - run: cmake --build --preset cpu-release --parallel 4
       - run: ctest --preset cpu-release
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

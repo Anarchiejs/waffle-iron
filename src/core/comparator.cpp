@@ -30,7 +30,7 @@ void progress_or_cancel(Engine& engine, const ProgressFn& progress, float f, con
 }
 } // namespace
 
-double compute_perplexity(EngineSession& session, std::string_view text, uint32_t n_ctx) {
+double compute_perplexity(EngineSession& session, std::string_view text, uint32_t n_ctx, uint32_t stride) {
     const auto& info = session.info();
     auto tokens = session.tokenize(text, true);
     // At least two windows of 16 tokens; shrink the window for small corpora.
@@ -41,7 +41,8 @@ double compute_perplexity(EngineSession& session, std::string_view text, uint32_
     double nll = 0;
     size_t count = 0;
     const size_t first = window / 2;
-    for (size_t start = 0; start + window <= tokens.size(); start += window) {
+    const size_t step = stride == 0 ? std::max<size_t>(1, window / 2) : stride;
+    for (size_t start = 0; start + window <= tokens.size(); start += step) {
         session.throw_if_stopped();
         session.clear_memory();
         // As in llama-perplexity, each window starts with BOS when the model requests it.
@@ -118,7 +119,8 @@ CompareOutput generate_side(EngineSession& session, const CompareRequest& req,
         if (on_token) on_token(piece);
     }
     output.tg_tps = output.n_generated ? output.n_generated / seconds(tg_start) : 0;
-    if (!req.perplexity_text.empty()) output.perplexity = compute_perplexity(session, req.perplexity_text);
+    if (!req.perplexity_text.empty())
+        output.perplexity = compute_perplexity(session, req.perplexity_text, 512, req.perplexity_stride);
     return output;
 }
 

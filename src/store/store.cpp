@@ -1,14 +1,16 @@
 #include "store/store.hpp"
 
 #include "core/bench.hpp"
+#include "core/util.hpp"
 
 #include <sqlite3.h>
 
-#include <chrono>
+#include <charconv>
 #include <cstdint>
 #include <cstdlib>
-#include <ctime>
-#include <sstream>
+#include <limits>
+#include <map>
+#include <set>
 #include <string_view>
 #include <utility>
 
@@ -41,27 +43,15 @@ void exec_sql(sqlite3* db, const char* sql) {
     }
 }
 
-std::string utf8_from_path(const std::filesystem::path& path) {
-    const auto u8 = path.u8string();
-    return std::string(reinterpret_cast<const char*>(u8.data()), u8.size());
+std::string model_key(const std::string& path) {
+    if (path.empty()) return {};
+    return path_key(path_from_utf8(path));
 }
 
-std::filesystem::path path_from_utf8(std::string_view utf8) {
-    const std::u8string u8(reinterpret_cast<const char8_t*>(utf8.data()), utf8.size());
-    return std::filesystem::path(u8);
-}
-
-std::string now_iso() {
-    const std::time_t t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-    std::tm tm{};
-#ifdef _WIN32
-    gmtime_s(&tm, &t);
-#else
-    gmtime_r(&t, &tm);
-#endif
-    char buf[32];
-    if (std::strftime(buf, sizeof buf, "%Y-%m-%dT%H:%M:%SZ", &tm) == 0) return "1970-01-01T00:00:00Z";
-    return buf;
+uint32_t u32_col(int64_t value) {
+    if (value < 0 || static_cast<uint64_t>(value) > std::numeric_limits<uint32_t>::max())
+        throw Error("Database: integer out of range");
+    return static_cast<uint32_t>(value);
 }
 
 std::string join_ints(const std::vector<int>& values) {
@@ -75,10 +65,22 @@ std::string join_ints(const std::vector<int>& values) {
 
 std::vector<int> split_ints(const std::string& text) {
     std::vector<int> out;
-    std::stringstream stream(text);
-    std::string item;
-    while (std::getline(stream, item, ',')) {
-        if (!item.empty()) out.push_back(std::stoi(item));
+    size_t i = 0;
+    while (i <= text.size()) {
+        const size_t comma = text.find(',', i);
+        const size_t end = comma == std::string::npos ? text.size() : comma;
+        const std::string_view item(text.data() + i, end - i);
+        i = end + 1;
+        if (item.empty()) {
+            if (comma == std::string::npos) break;
+            continue;
+        }
+        int value = 0;
+        const auto parsed = std::from_chars(item.data(), item.data() + item.size(), value);
+        if (parsed.ec != std::errc{} || parsed.ptr != item.data() + item.size())
+            throw Error("Database: invalid integer list");
+        out.push_back(value);
+        if (comma == std::string::npos) break;
     }
     return out;
 }
@@ -154,11 +156,7 @@ int user_version(sqlite3* db) {
     return query.integer(0);
 }
 
-// Schema v1. Versions already applied are not replayed.
-void migrate(sqlite3* db) {
-    if (user_version(db) >= 1) return;
-
-    exec_sql(db, R"SQL(
+const char* kSchemaV2 = R"SQL(
 CREATE TABLE IF NOT EXISTS models (
     path TEXT PRIMARY KEY,
     file_name TEXT NOT NULL,
@@ -206,6 +204,8 @@ CREATE TABLE IF NOT EXISTS results (
     n_gen INTEGER NOT NULL,
     repetitions INTEGER NOT NULL,
     warmup INTEGER NOT NULL,
+    swa_full INTEGER NOT NULL DEFAULT 1,
+    seed INTEGER NOT NULL DEFAULT 42,
     pp_n INTEGER NOT NULL,
     pp_mean REAL NOT NULL,
     pp_stddev REAL NOT NULL,
@@ -245,11 +245,72 @@ CREATE TABLE IF NOT EXISTS vram_checks (
     estimated_gpu INTEGER NOT NULL,
     measured_gpu INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS library_roots (
+    path TEXT PRIMARY KEY
+);
 CREATE INDEX IF NOT EXISTS idx_results_campaign ON results(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_results_model_path ON results(model_path);
 CREATE INDEX IF NOT EXISTS idx_vram_model ON vram_checks(model_path);
-)SQL");
-    exec_sql(db, "PRAGMA user_version = 1");
+)SQL";
+
+void rewrite_stored_paths(sqlite3* db) {
+    exec_sql(db, "PRAGMA foreign_keys = OFF");
+    std::set<std::string> paths;
+    auto collect = [&](const char* sql) {
+        Stmt query(db, sql);
+        while (query.step()) paths.insert(query.text(0));
+    };
+    collect("SELECT path FROM models");
+    collect("SELECT model_path FROM results");
+    collect("SELECT model_path FROM vram_checks");
+    for (const auto& old : paths) {
+        const std::string neu = model_key(old);
+        if (neu.empty() || neu == old) continue;
+        Stmt model(db, "SELECT 1 FROM models WHERE path = ?1");
+        model.bind_text(1, old);
+        if (model.step()) {
+            Stmt target(db, "SELECT 1 FROM models WHERE path = ?1");
+            target.bind_text(1, neu);
+            if (target.step()) {
+                Stmt drop(db, "DELETE FROM models WHERE path = ?1");
+                drop.bind_text(1, old);
+                drop.step();
+            } else {
+                Stmt tags(db, "UPDATE model_tags SET path = ?2 WHERE path = ?1");
+                tags.bind_text(1, old);
+                tags.bind_text(2, neu);
+                tags.step();
+                Stmt rename(db, "UPDATE models SET path = ?2 WHERE path = ?1");
+                rename.bind_text(1, old);
+                rename.bind_text(2, neu);
+                rename.step();
+            }
+        }
+        Stmt results(db, "UPDATE results SET model_path = ?2 WHERE model_path = ?1");
+        results.bind_text(1, old);
+        results.bind_text(2, neu);
+        results.step();
+        Stmt checks(db, "UPDATE vram_checks SET model_path = ?2 WHERE model_path = ?1");
+        checks.bind_text(1, old);
+        checks.bind_text(2, neu);
+        checks.step();
+    }
+    exec_sql(db, "PRAGMA foreign_keys = ON");
+}
+
+// Schema v2. Versions already applied are not replayed.
+void migrate(sqlite3* db) {
+    const int version = user_version(db);
+    if (version >= 2) return;
+    if (version <= 0) {
+        exec_sql(db, kSchemaV2);
+    } else {
+        exec_sql(db, "ALTER TABLE results ADD COLUMN swa_full INTEGER NOT NULL DEFAULT 1");
+        exec_sql(db, "ALTER TABLE results ADD COLUMN seed INTEGER NOT NULL DEFAULT 42");
+        exec_sql(db, "CREATE TABLE IF NOT EXISTS library_roots (path TEXT PRIMARY KEY)");
+    }
+    rewrite_stored_paths(db);
+    exec_sql(db, "PRAGMA user_version = 2");
 }
 
 void bind_stats(Stmt& stmt, int& index, const Stats& stats) {
@@ -282,7 +343,7 @@ std::vector<std::string> tags_of(sqlite3* db, const std::string& path) {
     return tags;
 }
 
-ModelRecord read_model_row(sqlite3* db, Stmt& stmt) {
+ModelRecord read_model_row(Stmt& stmt) {
     ModelRecord record;
     record.path = stmt.text(0);
     record.file_name = stmt.text(1);
@@ -291,11 +352,10 @@ ModelRecord read_model_row(sqlite3* db, Stmt& stmt) {
     record.file_type = stmt.text(4);
     record.file_size = static_cast<uint64_t>(stmt.integer64(5));
     record.n_params = static_cast<uint64_t>(stmt.integer64(6));
-    record.context_length = static_cast<uint32_t>(stmt.integer(7));
-    record.n_layer = static_cast<uint32_t>(stmt.integer(8));
+    record.context_length = u32_col(stmt.integer64(7));
+    record.n_layer = u32_col(stmt.integer64(8));
     record.notes = stmt.text(9);
     record.last_seen = stmt.text(10);
-    record.tags = tags_of(db, record.path);
     return record;
 }
 
@@ -312,7 +372,7 @@ Store::Store(const std::filesystem::path& db_path) {
     if (!parent.empty()) {
         std::error_code ec;
         std::filesystem::create_directories(parent, ec);
-        if (ec) throw Error("Database: Cannot create directory " + parent.string());
+        if (ec) throw Error("Database: Cannot create directory " + utf8_from_path(parent));
     }
 
     const int rc =
@@ -375,7 +435,7 @@ std::filesystem::path Store::default_path() {
 
 void Store::upsert_model(const ModelInfo& info) {
     std::lock_guard lock(mutex_);
-    const std::string path = utf8_from_path(info.path);
+    const std::string path = path_key(info.path);
     Stmt stmt(db_, R"SQL(
 INSERT INTO models(path, file_name, name, architecture, file_type, file_size, n_params,
                    context_length, n_layer, notes, last_seen)
@@ -398,8 +458,8 @@ ON CONFLICT(path) DO UPDATE SET
     stmt.bind_text(5, info.file_type);
     stmt.bind_int64(6, static_cast<int64_t>(info.file_size));
     stmt.bind_int64(7, static_cast<int64_t>(info.n_params));
-    stmt.bind_int(8, static_cast<int>(info.context_length));
-    stmt.bind_int(9, static_cast<int>(info.n_layer));
+    stmt.bind_int64(8, static_cast<int64_t>(info.context_length));
+    stmt.bind_int64(9, static_cast<int64_t>(info.n_layer));
     stmt.bind_text(10, now_iso());
     stmt.step();
 }
@@ -412,8 +472,17 @@ SELECT path, file_name, name, architecture, file_type, file_size, n_params,
 FROM models
 ORDER BY name, path
 )SQL");
+    std::map<std::string, std::vector<std::string>> tags;
+    {
+        Stmt query(db_, "SELECT path, tag FROM model_tags ORDER BY path, tag");
+        while (query.step()) tags[query.text(0)].push_back(query.text(1));
+    }
     std::vector<ModelRecord> records;
-    while (stmt.step()) records.push_back(read_model_row(db_, stmt));
+    while (stmt.step()) {
+        auto record = read_model_row(stmt);
+        if (auto it = tags.find(record.path); it != tags.end()) record.tags = it->second;
+        records.push_back(std::move(record));
+    }
     return records;
 }
 
@@ -424,17 +493,20 @@ SELECT path, file_name, name, architecture, file_type, file_size, n_params,
        context_length, n_layer, notes, last_seen
 FROM models WHERE path = ?1
 )SQL");
-    stmt.bind_text(1, path);
+    stmt.bind_text(1, model_key(path));
     if (!stmt.step()) return std::nullopt;
-    return read_model_row(db_, stmt);
+    auto record = read_model_row(stmt);
+    record.tags = tags_of(db_, record.path);
+    return record;
 }
 
 void Store::set_model_tags(const std::string& path, const std::vector<std::string>& tags) {
     std::lock_guard lock(mutex_);
-    require_model(db_, path);
+    const std::string key = model_key(path);
+    require_model(db_, key);
     Transaction tx(db_);
     Stmt clear(db_, "DELETE FROM model_tags WHERE path = ?1");
-    clear.bind_text(1, path);
+    clear.bind_text(1, key);
     clear.step();
     Stmt insert(db_, "INSERT INTO model_tags(path, tag) VALUES (?1, ?2)");
     std::vector<std::string> seen;
@@ -446,7 +518,7 @@ void Store::set_model_tags(const std::string& path, const std::vector<std::strin
         }
         if (duplicate) continue;
         seen.push_back(tag);
-        insert.bind_text(1, path);
+        insert.bind_text(1, key);
         insert.bind_text(2, tag);
         insert.step();
         insert.reset();
@@ -456,9 +528,10 @@ void Store::set_model_tags(const std::string& path, const std::vector<std::strin
 
 void Store::set_model_notes(const std::string& path, const std::string& notes) {
     std::lock_guard lock(mutex_);
-    require_model(db_, path);
+    const std::string key = model_key(path);
+    require_model(db_, key);
     Stmt stmt(db_, "UPDATE models SET notes = ?2 WHERE path = ?1");
-    stmt.bind_text(1, path);
+    stmt.bind_text(1, key);
     stmt.bind_text(2, notes);
     stmt.step();
 }
@@ -499,16 +572,16 @@ int64_t Store::save_campaign(const std::string& name, const std::vector<BenchRes
 INSERT INTO results(
     campaign_id, model_name, model_file_type, load_ms, vram_peak, gpu_name, llama_version, timestamp,
     model_path, n_gpu_layers, n_ctx, n_batch, n_ubatch, type_k, type_v, flash_attn, n_threads, n_seq_max,
-    n_prompt, n_gen, repetitions, warmup,
+    n_prompt, n_gen, repetitions, warmup, swa_full, seed,
     pp_n, pp_mean, pp_stddev, pp_median, pp_min, pp_max, pp_outliers,
     tg_n, tg_mean, tg_stddev, tg_median, tg_min, tg_max, tg_outliers,
     ttft_n, ttft_mean, ttft_stddev, ttft_median, ttft_min, ttft_max, ttft_outliers)
 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
         ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18,
-        ?19, ?20, ?21, ?22,
-        ?23, ?24, ?25, ?26, ?27, ?28, ?29,
-        ?30, ?31, ?32, ?33, ?34, ?35, ?36,
-        ?37, ?38, ?39, ?40, ?41, ?42, ?43)
+        ?19, ?20, ?21, ?22, ?23, ?24,
+        ?25, ?26, ?27, ?28, ?29, ?30, ?31,
+        ?32, ?33, ?34, ?35, ?36, ?37, ?38,
+        ?39, ?40, ?41, ?42, ?43, ?44, ?45)
 )SQL");
         const auto& load = result.config.load;
         int index = 1;
@@ -520,20 +593,22 @@ VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
         insert.bind_text(index++, result.gpu_name);
         insert.bind_text(index++, result.llama_version);
         insert.bind_text(index++, result.timestamp);
-        insert.bind_text(index++, utf8_from_path(load.model_path));
+        insert.bind_text(index++, path_key(load.model_path));
         insert.bind_int(index++, load.n_gpu_layers);
-        insert.bind_int(index++, static_cast<int>(load.n_ctx));
-        insert.bind_int(index++, static_cast<int>(load.n_batch));
-        insert.bind_int(index++, static_cast<int>(load.n_ubatch));
+        insert.bind_int64(index++, static_cast<int64_t>(load.n_ctx));
+        insert.bind_int64(index++, static_cast<int64_t>(load.n_batch));
+        insert.bind_int64(index++, static_cast<int64_t>(load.n_ubatch));
         insert.bind_text(index++, load.type_k);
         insert.bind_text(index++, load.type_v);
         insert.bind_int(index++, load.flash_attn);
         insert.bind_int(index++, load.n_threads);
-        insert.bind_int(index++, static_cast<int>(load.n_seq_max));
-        insert.bind_int(index++, static_cast<int>(result.config.n_prompt));
-        insert.bind_int(index++, static_cast<int>(result.config.n_gen));
+        insert.bind_int64(index++, static_cast<int64_t>(load.n_seq_max));
+        insert.bind_int64(index++, static_cast<int64_t>(result.config.n_prompt));
+        insert.bind_int64(index++, static_cast<int64_t>(result.config.n_gen));
         insert.bind_int(index++, result.config.repetitions);
         insert.bind_int(index++, result.config.warmup);
+        insert.bind_int(index++, load.swa_full ? 1 : 0);
+        insert.bind_int64(index++, static_cast<int64_t>(result.config.seed));
         bind_stats(insert, index, result.pp);
         bind_stats(insert, index, result.tg);
         bind_stats(insert, index, result.ttft);
@@ -561,6 +636,21 @@ VALUES (?1, ?2, ?3, ?4, ?5, ?6)
 
 std::vector<CampaignRecord> Store::list_campaigns() const {
     std::lock_guard lock(mutex_);
+    std::map<int64_t, int> counts;
+    std::map<int64_t, std::string> names;
+    {
+        Stmt count(db_, "SELECT campaign_id, COUNT(*) FROM results GROUP BY campaign_id");
+        while (count.step()) counts[count.integer64(0)] = count.integer(1);
+    }
+    {
+        Stmt query(db_, "SELECT campaign_id, model_name FROM results GROUP BY campaign_id, model_name "
+                        "ORDER BY campaign_id, model_name");
+        while (query.step()) {
+            auto& text = names[query.integer64(0)];
+            if (!text.empty()) text += ", ";
+            text += query.text(1);
+        }
+    }
     Stmt campaigns(db_, "SELECT id, name, created_at FROM campaigns ORDER BY id");
     std::vector<CampaignRecord> records;
     while (campaigns.step()) {
@@ -568,15 +658,8 @@ std::vector<CampaignRecord> Store::list_campaigns() const {
         record.id = campaigns.integer64(0);
         record.name = campaigns.text(1);
         record.created_at = campaigns.text(2);
-        Stmt count(db_, "SELECT COUNT(*) FROM results WHERE campaign_id = ?1");
-        count.bind_int64(1, record.id);
-        if (count.step()) record.n_results = count.integer(0);
-        Stmt names(db_, "SELECT DISTINCT model_name FROM results WHERE campaign_id = ?1 ORDER BY model_name");
-        names.bind_int64(1, record.id);
-        while (names.step()) {
-            if (!record.model_names.empty()) record.model_names += ", ";
-            record.model_names += names.text(0);
-        }
+        if (auto it = counts.find(record.id); it != counts.end()) record.n_results = it->second;
+        if (auto it = names.find(record.id); it != names.end()) record.model_names = it->second;
         records.push_back(std::move(record));
     }
     return records;
@@ -591,7 +674,7 @@ std::vector<BenchResult> Store::load_campaign(int64_t id) const {
     Stmt results(db_, R"SQL(
 SELECT id, model_name, model_file_type, load_ms, vram_peak, gpu_name, llama_version, timestamp,
        model_path, n_gpu_layers, n_ctx, n_batch, n_ubatch, type_k, type_v, flash_attn, n_threads, n_seq_max,
-       n_prompt, n_gen, repetitions, warmup,
+       n_prompt, n_gen, repetitions, warmup, swa_full, seed,
        pp_n, pp_mean, pp_stddev, pp_median, pp_min, pp_max, pp_outliers,
        tg_n, tg_mean, tg_stddev, tg_median, tg_min, tg_max, tg_outliers,
        ttft_n, ttft_mean, ttft_stddev, ttft_median, ttft_min, ttft_max, ttft_outliers
@@ -612,19 +695,21 @@ FROM results WHERE campaign_id = ?1 ORDER BY id
         auto& load = result.config.load;
         load.model_path = path_from_utf8(results.text(8));
         load.n_gpu_layers = results.integer(9);
-        load.n_ctx = static_cast<uint32_t>(results.integer(10));
-        load.n_batch = static_cast<uint32_t>(results.integer(11));
-        load.n_ubatch = static_cast<uint32_t>(results.integer(12));
+        load.n_ctx = u32_col(results.integer64(10));
+        load.n_batch = u32_col(results.integer64(11));
+        load.n_ubatch = u32_col(results.integer64(12));
         load.type_k = results.text(13);
         load.type_v = results.text(14);
         load.flash_attn = results.integer(15);
         load.n_threads = results.integer(16);
-        load.n_seq_max = static_cast<uint32_t>(results.integer(17));
-        result.config.n_prompt = static_cast<uint32_t>(results.integer(18));
-        result.config.n_gen = static_cast<uint32_t>(results.integer(19));
+        load.n_seq_max = u32_col(results.integer64(17));
+        result.config.n_prompt = u32_col(results.integer64(18));
+        result.config.n_gen = u32_col(results.integer64(19));
         result.config.repetitions = results.integer(20);
         result.config.warmup = results.integer(21);
-        int column = 22;
+        load.swa_full = results.integer(22) != 0;
+        result.config.seed = u32_col(results.integer64(23));
+        int column = 24;
         result.pp = read_stats(results, column);
         result.tg = read_stats(results, column);
         result.ttft = read_stats(results, column);
@@ -658,12 +743,12 @@ std::vector<HistoryPoint> Store::history(const std::string& model_path) const {
     std::lock_guard lock(mutex_);
     Stmt stmt(db_, R"SQL(
 SELECT timestamp, llama_version, pp_mean, tg_mean, ttft_mean, pp_stddev, tg_stddev,
-       n_gpu_layers, n_ctx, type_k, type_v, flash_attn, n_ubatch
+       n_gpu_layers, n_ctx, type_k, type_v, flash_attn, n_ubatch, swa_full, seed
 FROM results
 WHERE model_path = ?1
 ORDER BY timestamp, id
 )SQL");
-    stmt.bind_text(1, model_path);
+    stmt.bind_text(1, model_key(model_path));
     std::vector<HistoryPoint> points;
     while (stmt.step()) {
         HistoryPoint point;
@@ -676,11 +761,13 @@ ORDER BY timestamp, id
         point.tg_stddev = stmt.real(6);
         BenchConfig cfg;
         cfg.load.n_gpu_layers = stmt.integer(7);
-        cfg.load.n_ctx = static_cast<uint32_t>(stmt.integer(8));
+        cfg.load.n_ctx = u32_col(stmt.integer64(8));
         cfg.load.type_k = stmt.text(9);
         cfg.load.type_v = stmt.text(10);
         cfg.load.flash_attn = stmt.integer(11);
-        cfg.load.n_ubatch = static_cast<uint32_t>(stmt.integer(12));
+        cfg.load.n_ubatch = u32_col(stmt.integer64(12));
+        cfg.load.swa_full = stmt.integer(13) != 0;
+        cfg.seed = u32_col(stmt.integer64(14));
         point.config = config_label(cfg);
         points.push_back(std::move(point));
     }
@@ -693,7 +780,7 @@ void Store::save_vram_check(const VramCheck& check) {
 INSERT INTO vram_checks(model_path, timestamp, config, estimated_gpu, measured_gpu)
 VALUES (?1, ?2, ?3, ?4, ?5)
 )SQL");
-    stmt.bind_text(1, check.model_path);
+    stmt.bind_text(1, model_key(check.model_path));
     stmt.bind_text(2, check.timestamp.empty() ? now_iso() : check.timestamp);
     stmt.bind_text(3, check.config);
     stmt.bind_int64(4, static_cast<int64_t>(check.estimated_gpu));
@@ -707,7 +794,7 @@ std::vector<VramCheck> Store::vram_checks(const std::string& model_path) const {
 SELECT model_path, timestamp, config, estimated_gpu, measured_gpu
 FROM vram_checks WHERE model_path = ?1 ORDER BY timestamp, id
 )SQL");
-    stmt.bind_text(1, model_path);
+    stmt.bind_text(1, model_key(model_path));
     std::vector<VramCheck> checks;
     while (stmt.step()) {
         VramCheck check;
@@ -719,6 +806,23 @@ FROM vram_checks WHERE model_path = ?1 ORDER BY timestamp, id
         checks.push_back(std::move(check));
     }
     return checks;
+}
+
+void Store::add_library_root(const std::filesystem::path& root) {
+    std::lock_guard lock(mutex_);
+    const std::string key = path_key(root);
+    if (key.empty()) throw Error("Library folder is empty");
+    Stmt stmt(db_, "INSERT INTO library_roots(path) VALUES (?1) ON CONFLICT(path) DO NOTHING");
+    stmt.bind_text(1, key);
+    stmt.step();
+}
+
+std::vector<std::filesystem::path> Store::library_roots() const {
+    std::lock_guard lock(mutex_);
+    Stmt stmt(db_, "SELECT path FROM library_roots ORDER BY path");
+    std::vector<std::filesystem::path> roots;
+    while (stmt.step()) roots.push_back(path_from_utf8(stmt.text(0)));
+    return roots;
 }
 
 } // namespace waffle

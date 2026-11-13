@@ -3,7 +3,10 @@
 
 #include "core/types.hpp"
 
+#include <filesystem>
 #include <span>
+#include <string_view>
+#include <string_view>
 #include <stop_token>
 #include <string>
 #include <vector>
@@ -37,6 +40,8 @@ struct CampaignGrid {
     std::vector<std::string> kv_type; // applied to type_k AND type_v
     std::vector<int> flash_attn;
     std::vector<uint32_t> n_ubatch;
+    // Extra model files. Empty keeps base.load.model_path.
+    std::vector<std::filesystem::path> models;
 };
 std::vector<BenchConfig> expand_grid(const CampaignGrid& grid);
 
@@ -49,7 +54,10 @@ std::vector<BenchResult> run_campaign(Engine& engine, Telemetry* telemetry, cons
 std::string to_csv(const std::vector<BenchResult>& results);
 std::string to_markdown(const std::vector<BenchResult>& results);
 
-// Short configuration label: "ngl=99 ctx=4096 kv=q8_0 fa=on ub=512".
+// Short configuration label: "ngl=99 ctx=4096 kv=q8_0 fa=on ub=512 swa=full".
 std::string config_label(const BenchConfig& cfg);
+
+std::string results_to_json(const std::vector<BenchResult>& results);
+std::vector<BenchResult> results_from_json(std::string_view text);
 
 } // namespace waffle

@@ -1,4 +1,5 @@
 #include "core/engine.hpp"
+#include "core/util.hpp"
 
 #include <llama.h>
 #include <ggml-backend.h>
@@ -20,16 +21,20 @@ std::deque<std::string> g_recent_errors; // recent errors, used to enrich messag
 
 void log_callback(ggml_log_level level, const char* text, void*) {
     if (!text) return;
-    std::lock_guard lock(g_log_mutex);
-    if (level == GGML_LOG_LEVEL_ERROR || level == GGML_LOG_LEVEL_WARN) {
-        std::string line(text);
-        while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) line.pop_back();
-        if (!line.empty()) {
-            g_recent_errors.push_back(std::move(line));
-            if (g_recent_errors.size() > 4) g_recent_errors.pop_front();
+    std::function<void(int, std::string_view)> sink;
+    {
+        std::lock_guard lock(g_log_mutex);
+        if (level == GGML_LOG_LEVEL_ERROR || level == GGML_LOG_LEVEL_WARN) {
+            std::string line(text);
+            while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) line.pop_back();
+            if (!line.empty()) {
+                g_recent_errors.push_back(std::move(line));
+                if (g_recent_errors.size() > 4) g_recent_errors.pop_front();
+            }
         }
+        sink = g_log_sink;
     }
-    if (g_log_sink) g_log_sink(static_cast<int>(level), text);
+    if (sink) sink(static_cast<int>(level), text);
 }
 
 std::string take_recent_errors() {
@@ -116,7 +121,7 @@ const LoadedModel& EngineSession::load(const LoadParams& params, const ProgressF
 
     std::error_code ec;
     if (!std::filesystem::is_regular_file(params.model_path, ec))
-        throw Error("Model file not found: " + params.model_path.string());
+        throw Error("Model file not found: " + narrow_utf8(params.model_path));
 
     const int type_k = ggml_type_from_name(params.type_k);
     const int type_v = ggml_type_from_name(params.type_v);
@@ -130,11 +135,12 @@ const LoadedModel& EngineSession::load(const LoadParams& params, const ProgressF
     mp.progress_callback = progress_trampoline;
     mp.progress_callback_user_data = &bridge;
 
-    model_ = llama_model_load_from_file(params.model_path.string().c_str(), mp);
+    const std::string model_utf8 = narrow_utf8(params.model_path);
+    model_ = llama_model_load_from_file(model_utf8.c_str(), mp);
     if (!model_) {
         throw_if_stopped();
         const std::string details = take_recent_errors();
-        throw Error("Cannot load model \"" + params.model_path.filename().string() +
+        throw Error("Cannot load model \"" + narrow_utf8(params.model_path.filename()) +
                     "\": corrupted file, unsupported architecture, or insufficient memory." +
                     (details.empty() ? "" : "\nDetail: " + details));
     }

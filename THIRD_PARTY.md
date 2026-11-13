@@ -44,6 +44,10 @@ Boost Software License 1.0.
 
 https://github.com/catchorg/Catch2
 
+## Test fixture
+
+`tests/data/tiny-llama.gguf` is random weights written by `scripts/make_tiny_model.py` for the test suite. It is not a published model and it is not under a third-party model license.
+
 ## Fonts
 
 `assets/fonts/lucide.ttf` (Lucide 0.544.0) is included. The build copies it next to `WaffleIron`, and `NOTICE` carries the full ISC text plus the MIT notice for the Feather icons incorporated into Lucide. https://github.com/lucide-icons/lucide

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- UTF-8 paths for model loads, GGUF names, fonts, and the interface settings file. The library key is the canonical path.
+- Benchmark results store the SWA cache mode and the seed. The history label includes them. VRAM peaks are the increase over the baseline, and the planner check shares one load-and-decode measurement with the command line.
+- `waffle --version`, `--ubatch`, `--swa-full`, `--threads`, `--warmup`, `--seed`, `--ctv`, JSON export and import, perplexity, and a non-zero exit when a scan or GPU sample fails.
+- Sampler lab: Mirostat v2 and DRY. The comparator shows a word diff. The bench grid can measure several models, and history charts draw standard-deviation bars.
+- DirectX 11 uses a flip discard swap chain and rebuilds the device if it is removed. Fonts rebuild when the DPI changes. A folder dialog and file drop add library folders.
+- Schema v2, one query for tags and one for campaign names, and the command line is a library covered by tests.
 - Linux and macOS builds beside Windows. CPU presets on all three, CUDA on Windows and Linux, Metal on macOS.
 - GLFW and OpenGL interface on Linux and macOS. The Windows interface stays on DirectX 11.
 - Model folders follow `$HOME` on Linux and macOS, plus the Ollama systemd library on Linux. The library database uses XDG on Linux and Application Support on macOS.

@@ -1,12 +1,15 @@
 #include "core/gguf_reader.hpp"
+#include "core/util.hpp"
 
 #include <algorithm>
 #include <cerrno>
 #include <cstdlib>
 #include <fstream>
+#include <mutex>
 #include <regex>
 #include <sstream>
 #include <system_error>
+#include <unordered_map>
 
 #if !defined(_WIN32) && !defined(__APPLE__)
 #include <pwd.h>
@@ -58,19 +61,28 @@ std::filesystem::path profile_directory() {
 
 } // namespace
 
-std::optional<OllamaBlob> find_ollama_blob(const std::filesystem::path& path) {
-    const auto file = path.filename().string();
-    if (!file.starts_with("sha256-")) return std::nullopt;
-    const auto digest = file.substr(7);
-    const auto manifests = path.parent_path().parent_path() / "manifests";
-    std::error_code ec;
-    if (!std::filesystem::is_directory(manifests, ec)) return std::nullopt;
+struct OllamaIndex {
+    std::unordered_map<std::string, OllamaBlob> by_digest;
+};
+
+struct OllamaCache {
+    std::mutex mutex;
+    std::unordered_map<std::string, OllamaIndex> by_manifests;
+};
+
+OllamaCache& ollama_cache() {
+    static OllamaCache cache;
+    return cache;
+}
+
+OllamaIndex index_manifests(const std::filesystem::path& manifests) {
     // Manifests are simple JSON: each layer is an object with no nested object,
     // with "mediaType" (…image.model, …image.draft, …image.projector) and "digest" ("sha256:…").
     static const std::regex layer(R"(\{[^{}]*\})");
     static const std::regex media(R"re("mediaType"\s*:\s*"([^"]*)")re");
     static const std::regex sha(R"re("digest"\s*:\s*"sha256:([0-9a-fA-F]+)")re");
-    std::optional<OllamaBlob> found;
+    OllamaIndex index;
+    std::error_code ec;
     std::filesystem::recursive_directory_iterator it(manifests,
                                                      std::filesystem::directory_options::skip_permission_denied, ec),
         end;
@@ -80,17 +92,40 @@ std::optional<OllamaBlob> find_ollama_blob(const std::filesystem::path& path) {
         std::stringstream text;
         text << in.rdbuf();
         const auto json = text.str();
+        const auto tag = ollama_tag(std::filesystem::relative(it->path(), manifests, ec));
         for (std::sregex_iterator l(json.begin(), json.end(), layer), last; l != last; ++l) {
             const auto object = l->str();
             std::smatch m, d;
-            if (!std::regex_search(object, d, sha) || d[1].str() != digest) continue;
-            if (!found) found.emplace();
-            const auto tag = ollama_tag(std::filesystem::relative(it->path(), manifests, ec));
-            if (found->tags.find(tag) == std::string::npos) found->tags += (found->tags.empty() ? "" : ", ") + tag;
-            if (std::regex_search(object, m, media) && m[1].str().ends_with(".model")) found->model = true;
+            if (!std::regex_search(object, d, sha)) continue;
+            auto& blob = index.by_digest[d[1].str()];
+            if (blob.tags.find(tag) == std::string::npos) blob.tags += (blob.tags.empty() ? "" : ", ") + tag;
+            if (std::regex_search(object, m, media) && m[1].str().ends_with(".model")) blob.model = true;
         }
     }
-    return found;
+    return index;
+}
+
+void clear_ollama_cache() {
+    auto& cache = ollama_cache();
+    std::lock_guard lock(cache.mutex);
+    cache.by_manifests.clear();
+}
+
+std::optional<OllamaBlob> find_ollama_blob(const std::filesystem::path& path) {
+    const auto file = utf8_from_path(path.filename());
+    if (!file.starts_with("sha256-")) return std::nullopt;
+    const auto digest = file.substr(7);
+    const auto manifests = path.parent_path().parent_path() / "manifests";
+    std::error_code ec;
+    if (!std::filesystem::is_directory(manifests, ec)) return std::nullopt;
+    auto& cache = ollama_cache();
+    std::lock_guard lock(cache.mutex);
+    const std::string key = utf8_from_path(manifests);
+    auto it = cache.by_manifests.find(key);
+    if (it == cache.by_manifests.end()) it = cache.by_manifests.emplace(key, index_manifests(manifests)).first;
+    const auto found = it->second.by_digest.find(digest);
+    if (found == it->second.by_digest.end()) return std::nullopt;
+    return found->second;
 }
 
 namespace {

@@ -1,4 +1,5 @@
 #include "core/comparator.hpp"
+#include "core/text_diff.hpp"
 #include "ui/icons.hpp"
 #include "ui/theme.hpp"
 #include "ui/view.hpp"
@@ -203,12 +204,24 @@ class CompareView final : public View {
         metric("Prompt prefill", a.pp_tps, b.pp_tps, true, "tok/s", va && a.pp_tps > 0, vb && b.pp_tps > 0);
         metric("Generation", a.tg_tps, b.tg_tps, true, "tok/s", va && a.tg_tps > 0, vb && b.tg_tps > 0);
         metric("Load", a.load_ms, b.load_ms, false, "ms", va, vb);
-        metric("VRAM max", static_cast<double>(a.vram_peak) / MiB, static_cast<double>(b.vram_peak) / MiB, false, "Mo",
+        metric("VRAM max", static_cast<double>(a.vram_peak) / MiB, static_cast<double>(b.vram_peak) / MiB, false, "MiB",
                va && a.vram_peak > 0, vb && b.vram_peak > 0);
         metric("Perplexity", a.perplexity.value_or(0), b.perplexity.value_or(0), false, "",
                va && a.perplexity.has_value(), vb && b.perplexity.has_value());
         metric("Generated tokens", a.n_generated, b.n_generated, true, "tokens", va, vb);
         ImGui::EndTable();
+        if (va && vb && !a.text.empty() && !b.text.empty()) {
+            ImGui::Dummy({0, em(.4f)});
+            card_title("Word diff", "Green is only in B, red is only in A.");
+            for (const auto& span : waffle::word_diff(a.text, b.text)) {
+                const ImVec4 color = span.op == waffle::DiffOp::Insert   ? col::good
+                                     : span.op == waffle::DiffOp::Delete ? col::bad
+                                                                         : col::text;
+                ImGui::PushStyleColor(ImGuiCol_Text, color);
+                ImGui::TextWrapped("%s", span.text.c_str());
+                ImGui::PopStyleColor();
+            }
+        }
     }
 
 public:

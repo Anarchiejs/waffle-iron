@@ -3,7 +3,9 @@
 #include "ui/theme.hpp"
 #include "ui/widgets.hpp"
 #include "core/gguf_reader.hpp"
+#include "core/util.hpp"
 #include "core/vram_planner.hpp"
+#include "core/vram_verify.hpp"
 #include <imgui.h>
 #include <implot.h>
 #include <algorithm>
@@ -20,8 +22,11 @@ std::string path_utf8(const std::filesystem::path& path) {
     return {bytes.begin(), bytes.end()};
 }
 VramPlanInput plan_input(const LoadParams& p) {
-    return {p.n_gpu_layers, p.n_ctx,           p.n_batch,   p.n_ubatch, p.type_k,
-            p.type_v,       p.flash_attn != 0, p.n_seq_max, p.swa_full};
+    VramPlanInput input{p.n_gpu_layers, p.n_ctx,           p.n_batch,   p.n_ubatch, p.type_k,
+                        p.type_v,       p.flash_attn != 0, p.n_seq_max, p.swa_full};
+    input.flash_attn_auto = p.flash_attn < 0;
+    if (p.flash_attn < 0) input.flash_attn = true;
+    return input;
 }
 std::string config_label(const LoadParams& p) {
     return "ngl=" + std::to_string(p.n_gpu_layers) + " ctx=" + std::to_string(p.n_ctx) + " kv=" + p.type_k + "/" +
@@ -110,52 +115,27 @@ class VramView final : public View {
         return &model;
     }
     void start_check(AppContext& ctx, uint64_t estimated) {
+        auto* engine = &ctx.engine;
         auto* telemetry = &ctx.telemetry;
         auto* store = &ctx.store;
         const auto params = params_;
-        checking_ = ctx.engine.submit([telemetry, store, params, estimated](EngineSession& session) {
-            session.unload();
-            // Let the probe observe memory before the baseline.
-            std::this_thread::sleep_for(std::chrono::milliseconds(200));
-            auto before = telemetry->sample();
-#if !defined(__APPLE__)
-            if (!before) throw Error("NVML sample unavailable before load");
-#endif
-            try {
-                session.load(params);
-                std::this_thread::sleep_for(std::chrono::milliseconds(200));
-                auto after = telemetry->sample();
-#if !defined(__APPLE__)
-                if (!after) throw Error("NVML sample unavailable after load");
-#endif
-                VramCheck result;
-                result.model_path = path_utf8(params.model_path);
-                result.config = config_label(params);
-                result.estimated_gpu = estimated;
-                if (before && after) {
-                    result.measured_gpu =
-                        after->vram_used > before->vram_used ? after->vram_used - before->vram_used : 0;
-                } else {
-                    result.config += " (memory not measured)";
-                    result.measured_gpu = 0;
-                }
-                const auto now = std::time(nullptr);
-                std::tm utc{};
-#ifdef _WIN32
-                gmtime_s(&utc, &now);
-#else
-                gmtime_r(&now, &utc);
-#endif
-                char date[32];
-                std::strftime(date, sizeof date, "%Y-%m-%dT%H:%M:%SZ", &utc);
-                result.timestamp = date;
-                session.unload();
-                store->save_vram_check(result);
-                return result;
-            } catch (...) {
-                session.unload();
-                throw;
+        checking_ = std::async(std::launch::async, [engine, telemetry, store, params, estimated] {
+            const ModelInfo model = read_gguf(params.model_path, false);
+            const auto verified = verify_model_vram(*engine, telemetry, model, plan_input(params), params);
+            VramCheck result;
+            result.model_path = path_utf8(params.model_path);
+            result.config = config_label(params);
+            result.estimated_gpu = estimated ? estimated : verified.estimated_gpu;
+            const bool measured = verified.note.empty() || verified.note.starts_with("Metal reports");
+            if (measured) {
+                result.measured_gpu = verified.measured_gpu;
+            } else {
+                result.config += " (memory not measured)";
+                result.measured_gpu = 0;
             }
+            result.timestamp = now_iso();
+            store->save_vram_check(result);
+            return result;
         });
     }
     void results(AppContext& ctx, const ModelInfo& model, const VramEstimate& estimate,
@@ -164,10 +144,10 @@ class VramView final : public View {
         const uint64_t used = sample ? sample->vram_used : 0;
         const uint64_t free = capacity > used ? capacity - used : 0;
         std::vector<Tile> tiles = {{"GPU estimate", format_bytes(estimate.total_gpu()), "", col::accent},
-                                   {"Hors GPU (RAM)", format_bytes(estimate.total_cpu()), "", col::teal}};
+                                   {"Off GPU (RAM)", format_bytes(estimate.total_cpu()), "", col::teal}};
         if (sample) {
             const int64_t margin = static_cast<int64_t>(free) - static_cast<int64_t>(estimate.total_gpu());
-            tiles.push_back({"VRAM libre", format_bytes(free), "/ " + format_bytes(capacity), col::mauve});
+            tiles.push_back({"Free VRAM", format_bytes(free), "/ " + format_bytes(capacity), col::mauve});
             tiles.push_back({"Margin", signed_bytes(margin), margin >= 0 ? "it fits" : "over budget",
                              margin >= 0 ? col::good : col::bad});
         }
@@ -182,7 +162,7 @@ class VramView final : public View {
                                   ImPlotFlags_NoTitle | ImPlotFlags_NoMenus | ImPlotFlags_NoBoxSelect)) {
                 ImPlot::SetupAxis(ImAxis_X1, nullptr, ImPlotAxisFlags_NoHighlight);
                 ImPlot::SetupAxis(ImAxis_Y1, nullptr, ImPlotAxisFlags_NoHighlight);
-                ImPlot::SetupAxisFormat(ImAxis_Y1, "%.1f Go");
+                ImPlot::SetupAxisFormat(ImAxis_Y1, "%.1f GiB");
                 ImPlot::SetupLegend(ImPlotLocation_North, ImPlotLegendFlags_Outside | ImPlotLegendFlags_Horizontal |
                                                               ImPlotLegendFlags_NoButtons);
                 ImPlot::SetupAxisLimits(ImAxis_X1, -.6, 1.6, ImPlotCond_Always);
@@ -192,7 +172,7 @@ class VramView final : public View {
                 const double ticks[] = {0, 1};
                 const char* labels[] = {"GPU", "CPU"};
                 ImPlot::SetupAxisTicks(ImAxis_X1, ticks, 2, labels);
-                const char* components[] = {"Poids", "Cache KV", "Tampons", "Overhead"};
+                const char* components[] = {"Weights", "KV cache", "Buffers", "Overhead"};
                 const double data[] = {
                     static_cast<double>(estimate.weights_gpu) / GiB,  static_cast<double>(estimate.weights_cpu) / GiB,
                     static_cast<double>(estimate.kv_cache_gpu) / GiB, static_cast<double>(estimate.kv_cache_cpu) / GiB,
@@ -209,7 +189,7 @@ class VramView final : public View {
                     const double limit = static_cast<double>(capacity) / GiB;
                     const double ys[] = {limit, limit};
                     limit_line.LineColor = col::bad;
-                    ImPlot::PlotLine("VRAM totale", span, ys, 2, limit_line);
+                    ImPlot::PlotLine("Total VRAM", span, ys, 2, limit_line);
                 }
                 if (sample) {
                     const double occupied = static_cast<double>(used) / GiB;

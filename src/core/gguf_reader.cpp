@@ -1,4 +1,5 @@
 #include "core/gguf_reader.hpp"
+#include "core/util.hpp"
 
 #include <gguf.h>
 #include <algorithm>
@@ -8,9 +9,11 @@
 #include <cstring>
 #include <fstream>
 #include <limits>
+#include <locale>
 #include <memory>
 #include <set>
 #include <sstream>
+#include <string_view>
 
 namespace waffle {
 namespace {
@@ -18,6 +21,7 @@ template <class T> std::string number(const void* data, size_t i) {
     T value;
     std::memcpy(&value, static_cast<const char*>(data) + i * sizeof(T), sizeof(T));
     std::ostringstream out;
+    out.imbue(std::locale::classic());
     out.precision(std::numeric_limits<T>::max_digits10);
     if constexpr (std::is_same_v<T, uint8_t> || std::is_same_v<T, int8_t>)
         out << int(value);
@@ -87,19 +91,19 @@ std::string ftype_name(uint32_t type) {
 
 ModelInfo read_gguf(const std::filesystem::path& path, bool with_tensors) {
     try {
-        if (!is_gguf_file(path)) throw Error("Missing GGUF signature: " + path.string());
+        const std::string shown = utf8_from_path(path);
+        if (!is_gguf_file(path)) throw Error("Missing GGUF signature: " + shown);
         ggml_context* raw = nullptr;
-        const auto utf8 = path.u8string();
-        std::unique_ptr<gguf_context, decltype(&gguf_free)> ctx(
-            gguf_init_from_file(reinterpret_cast<const char*>(utf8.c_str()), {true, &raw}), gguf_free);
+        std::unique_ptr<gguf_context, decltype(&gguf_free)> ctx(gguf_init_from_file(shown.c_str(), {true, &raw}),
+                                                                gguf_free);
         std::unique_ptr<ggml_context, decltype(&ggml_free)> tensors(raw, ggml_free);
-        if (!ctx || !tensors) throw Error("Unreadable GGUF header: " + path.string());
+        if (!ctx || !tensors) throw Error("Unreadable GGUF header: " + shown);
         ModelInfo model;
         model.path = path;
-        model.file_name = path.filename().string();
+        model.file_name = utf8_from_path(path.filename());
         model.file_size = std::filesystem::file_size(path);
         model.architecture = string_value(ctx.get(), "general.architecture");
-        model.name = string_value(ctx.get(), "general.name", path.stem().string());
+        model.name = string_value(ctx.get(), "general.name", utf8_from_path(path.stem()));
         if (const auto blob = find_ollama_blob(path); blob && blob->model) model.name = blob->tags + " (Ollama)";
         model.file_type = ftype_name(integer(ctx.get(), "general.file_type", UINT32_MAX));
         const auto prefix = model.architecture + ".";
@@ -156,6 +160,7 @@ ModelInfo read_gguf(const std::filesystem::path& path, bool with_tensors) {
             TensorInfo info;
             info.name = gguf_get_tensor_name(ctx.get(), id);
             const auto* tensor = ggml_get_tensor(tensors.get(), info.name.c_str());
+            if (!tensor) throw Error("GGUF tensor missing from the context: " + info.name);
             info.type = ggml_type_name(gguf_get_tensor_type(ctx.get(), id));
             info.n_bytes = gguf_get_tensor_size(ctx.get(), id);
             info.n_elements = static_cast<uint64_t>(ggml_nelements(tensor));
@@ -177,11 +182,30 @@ ModelInfo read_gguf(const std::filesystem::path& path, bool with_tensors) {
     } catch (const Error&) {
         throw;
     } catch (const std::exception& e) {
-        throw Error("Cannot read GGUF: " + path.string() + ": " + e.what());
+        throw Error("Cannot read GGUF: " + utf8_from_path(path) + ": " + e.what());
     }
 }
 
+bool is_later_shard(std::string_view name) {
+    for (size_t i = 0; i + 4 < name.size(); ++i) {
+        if (name[i] != '-') continue;
+        size_t j = i + 1;
+        if (j >= name.size() || !std::isdigit(static_cast<unsigned char>(name[j]))) continue;
+        const size_t digits = j;
+        while (j < name.size() && std::isdigit(static_cast<unsigned char>(name[j]))) ++j;
+        if (j + 4 > name.size() || name.substr(j, 4) != "-of-") continue;
+        size_t k = j + 4;
+        if (k >= name.size() || !std::isdigit(static_cast<unsigned char>(name[k]))) continue;
+        while (k < name.size() && std::isdigit(static_cast<unsigned char>(name[k]))) ++k;
+        unsigned long index = 0;
+        const auto parsed = std::from_chars(name.data() + digits, name.data() + j, index);
+        if (parsed.ec == std::errc{} && parsed.ptr == name.data() + j && index != 1) return true;
+    }
+    return false;
+}
+
 std::vector<std::filesystem::path> scan_model_dirs(const std::vector<std::filesystem::path>& roots) {
+    clear_ollama_cache();
     std::set<std::filesystem::path> result;
     for (const auto& root : roots) {
         std::error_code ec;
@@ -191,13 +215,10 @@ std::vector<std::filesystem::path> scan_model_dirs(const std::vector<std::filesy
         while (it != end) {
             const auto path = it->path();
             if (it->is_regular_file(ec)) {
-                auto name = path.filename().string();
+                auto name = utf8_from_path(path.filename());
                 std::transform(name.begin(), name.end(), name.begin(),
                                [](unsigned char c) { return char(std::tolower(c)); });
-                const auto split = name.find("-of-");
-                const bool later_shard = split >= 6 && split != std::string::npos && name[split - 6] == '-' &&
-                                         name.substr(split - 5, 5) != "00001";
-                if (!name.starts_with("mmproj") && !later_shard && is_gguf_file(path)) {
+                if (!name.starts_with("mmproj") && !is_later_shard(name) && is_gguf_file(path)) {
                     const auto blob = find_ollama_blob(path);
                     if (!blob || blob->model) result.insert(path.lexically_normal());
                 }

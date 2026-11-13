@@ -1,4 +1,5 @@
 #include "core/bench.hpp"
+#include "core/util.hpp"
 #include "ui/icons.hpp"
 #include "ui/theme.hpp"
 #include "ui/view.hpp"
@@ -94,7 +95,9 @@ class BenchView final : public View {
     int model_ = -1, seen_selection_ = -1;
     char gpu_[128] = "0,20,99", ctx_[128] = "4096", kv_[128] = "f16", fa_[128] = "1", ub_[128] = "512";
     char name_[256] = "Campaign", path_[2048] = {};
-    int prompt_ = 512, gen_ = 128, reps_ = 5;
+    int prompt_ = 512, gen_ = 128, reps_ = 5, warmup_ = 1;
+    unsigned seed_ = 42;
+    std::vector<int> also_;
     Engine* engine_ = nullptr;
     std::future<CampaignOutput> future_;
     std::shared_ptr<CampaignProgress> progress_ = std::make_shared<CampaignProgress>();
@@ -110,6 +113,13 @@ class BenchView final : public View {
         g.base.n_prompt = static_cast<uint32_t>(prompt_);
         g.base.n_gen = static_cast<uint32_t>(gen_);
         g.base.repetitions = reps_;
+        g.base.warmup = std::max(0, warmup_);
+        g.base.seed = seed_;
+        for (int index : also_) {
+            if (index < 0 || index >= static_cast<int>(ctx.library.size()) || index == model_) continue;
+            g.models.push_back(ctx.library[static_cast<size_t>(index)].path);
+        }
+        if (!g.models.empty()) g.models.insert(g.models.begin(), g.base.load.model_path);
         if (prompt_ < 1 || gen_ < 1 || reps_ < 1)
             throw Error("Prompt, generation, and repetition counts must be positive");
         for (const auto& v : split_values(gpu_)) g.n_gpu_layers.push_back(integer(v, -1, 100000));
@@ -118,8 +128,10 @@ class BenchView final : public View {
         for (const auto& v : g.kv_type) (void)ggml_type_from_name(v);
         for (const auto& v : split_values(fa_)) g.flash_attn.push_back(integer(v, -1, 1));
         for (const auto& v : split_values(ub_)) g.n_ubatch.push_back(static_cast<uint32_t>(integer(v, 1, 1000000)));
-        const size_t count =
-            g.n_gpu_layers.size() * g.n_ctx.size() * g.kv_type.size() * g.flash_attn.size() * g.n_ubatch.size();
+        const size_t models = std::max<size_t>(1, g.models.size());
+        const size_t count = std::max<size_t>(1, g.n_gpu_layers.size()) * std::max<size_t>(1, g.n_ctx.size()) *
+                             std::max<size_t>(1, g.kv_type.size()) * std::max<size_t>(1, g.flash_attn.size()) *
+                             std::max<size_t>(1, g.n_ubatch.size()) * models;
         if (count > 10000) throw Error("Limit: 10,000 configurations per campaign");
         return g;
     }
@@ -129,9 +141,26 @@ class BenchView final : public View {
         ImGui::BeginDisabled(future_.valid());
         field_label("Model");
         model_combo("##model", ctx, model_);
+        if (ImGui::Button("Also measure the selected model") && model_ >= 0 &&
+            std::find(also_.begin(), also_.end(), model_) == also_.end())
+            also_.push_back(model_);
+        for (size_t i = 0; i < also_.size();) {
+            const int index = also_[i];
+            const char* label = index >= 0 && index < static_cast<int>(ctx.library.size())
+                                    ? ctx.library[static_cast<size_t>(index)].name.c_str()
+                                    : "?";
+            ImGui::TextUnformatted(label);
+            ImGui::SameLine();
+            ImGui::PushID(static_cast<int>(i));
+            if (ImGui::SmallButton("Remove"))
+                also_.erase(also_.begin() + static_cast<std::ptrdiff_t>(i));
+            else
+                ++i;
+            ImGui::PopID();
+        }
         field_label("Campaign name");
         ImGui::InputText("##name", name_, sizeof(name_));
-        section_header("GRILLE");
+        section_header("GRID");
         field_pair(
             [&](float w) {
                 field_label("GPU layers", "-1, or a value at least the layer count: everything on the GPU.", w);
@@ -165,6 +194,15 @@ class BenchView final : public View {
         field_label("Repetitions", "Each configuration is measured this many times; standard deviation and outliers "
                                    "come from that.");
         ImGui::InputInt("##reps", &reps_, 0, 0);
+        field_pair(
+            [&](float w) {
+                field_label("Warmup", "Discarded runs before the measured ones.", w);
+                ImGui::InputInt("##warmup", &warmup_, 0, 0);
+            },
+            [&](float w) {
+                field_label("Seed", nullptr, w);
+                ImGui::InputScalar("##seed", ImGuiDataType_U32, &seed_);
+            });
         ImGui::Dummy({0, em(.2f)});
         std::optional<CampaignGrid> parsed;
         try {
@@ -246,7 +284,7 @@ class BenchView final : public View {
         for (int kind = 0; kind < 2; ++kind) {
             ImGui::SameLine();
             if (ImGui::Button(kind ? "Markdown" : "CSV")) {
-                auto path = std::filesystem::u8path(path_);
+                auto path = waffle::path_from_utf8(path_);
                 path.replace_extension(kind ? ".md" : ".csv");
                 if (path.has_parent_path()) std::filesystem::create_directories(path.parent_path());
                 std::ofstream file(path, std::ios::binary);
@@ -373,7 +411,8 @@ class BenchView final : public View {
             records_ = ctx.store.list_campaigns();
             history_.clear();
             if (history_model_ >= 0 && history_model_ < static_cast<int>(ctx.library.size()))
-                history_ = ctx.store.history(ctx.library[static_cast<size_t>(history_model_)].path.string());
+                history_ =
+                    ctx.store.history(waffle::utf8_from_path(ctx.library[static_cast<size_t>(history_model_)].path));
             refresh_ = false;
         }
         if (records_.empty()) {
@@ -507,18 +546,23 @@ class BenchView final : public View {
             size_t group_index = 0;
             for (const auto& [config, indices] : groups) {
                 const std::string& name = names.rows[group_index++];
-                std::vector<double> x, pp, tg;
+                std::vector<double> x, pp, tg, pp_err, tg_err;
                 for (size_t i : indices) {
                     x.push_back(history_time(history_[i].timestamp) - t_min);
                     pp.push_back(history_[i].pp_mean);
                     tg.push_back(history_[i].tg_mean);
+                    pp_err.push_back(history_[i].pp_stddev);
+                    tg_err.push_back(history_[i].tg_stddev);
                 }
                 // ImPlot draws the points and the legend; the segments are drawn with ImGui, because the
                 // long diagonal PlotLine segments come out dashed on this chart.
                 ImPlotSpec spec;
                 spec.Marker = ImPlotMarker_Circle;
-                auto plot = [&](const std::string& label, const std::vector<double>& ys) {
+                auto plot = [&](const std::string& label, const std::vector<double>& ys,
+                                const std::vector<double>& err) {
                     ImPlot::PlotScatter(label.c_str(), x.data(), ys.data(), static_cast<int>(x.size()), spec);
+                    ImPlot::PlotErrorBars((label + " sd").c_str(), x.data(), ys.data(), err.data(),
+                                          static_cast<int>(x.size()));
                     const ImU32 color = ImGui::GetColorU32(ImPlot::GetLastItemColor());
                     ImPlot::PushPlotClipRect();
                     for (size_t k = 1; k < x.size(); ++k)
@@ -527,9 +571,9 @@ class BenchView final : public View {
                     ImPlot::PopPlotClipRect();
                 };
                 ImPlot::SetAxes(ImAxis_X1, ImAxis_Y1);
-                plot(name + " pp", pp);
+                plot(name + " pp", pp, pp_err);
                 ImPlot::SetAxes(ImAxis_X1, ImAxis_Y2);
-                plot(name + " tg", tg);
+                plot(name + " tg", tg, tg_err);
             }
             if (ImPlot::IsPlotHovered()) {
                 double x = ImPlot::GetPlotMousePos(ImAxis_X1, ImAxis_Y1).x + t_min;
@@ -548,41 +592,9 @@ class BenchView final : public View {
 
 public:
     BenchView() {
-#ifdef _WIN32
-        const char* home = std::getenv("USERPROFILE");
-        auto path = (home ? std::filesystem::path(home) : std::filesystem::current_path()) / "Documents" /
-                    "WaffleIron" / "campaign.csv";
-#else
-        std::filesystem::path documents;
-#if defined(__APPLE__)
-        const char* home = std::getenv("HOME");
-        documents = (home && *home ? std::filesystem::path(home) : std::filesystem::current_path()) / "Documents";
-#else
-        if (const char* xdg = std::getenv("XDG_DOCUMENTS_DIR"); xdg && *xdg) {
-            documents = std::filesystem::path(xdg);
-        } else if (const char* home = std::getenv("HOME"); home && *home) {
-            documents = std::filesystem::path(home) / "Documents";
-            std::ifstream dirs(std::filesystem::path(home) / ".config" / "user-dirs.dirs");
-            std::string line;
-            while (std::getline(dirs, line)) {
-                constexpr std::string_view key = "XDG_DOCUMENTS_DIR=";
-                if (!line.starts_with(key)) continue;
-                std::string value = line.substr(key.size());
-                if (value.size() >= 2 && value.front() == '"' && value.back() == '"')
-                    value = value.substr(1, value.size() - 2);
-                constexpr std::string_view token = "$HOME";
-                if (value.starts_with(token)) value = std::string(home) + value.substr(token.size());
-                if (!value.empty()) documents = std::filesystem::path(value);
-                break;
-            }
-        } else {
-            documents = std::filesystem::current_path() / "Documents";
-        }
-#endif
-        auto path = documents / "WaffleIron" / "campaign.csv";
-#endif
-        auto utf8 = path.u8string();
-        std::snprintf(path_, sizeof(path_), "%s", reinterpret_cast<const char*>(utf8.c_str()));
+        const auto path = waffle::documents_directory() / "WaffleIron" / "campaign.csv";
+        const auto utf8 = waffle::utf8_from_path(path);
+        std::snprintf(path_, sizeof(path_), "%s", utf8.c_str());
     }
     ~BenchView() override {
         progress_->cancel = true;

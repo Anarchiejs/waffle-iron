@@ -67,9 +67,13 @@ find_package(unofficial-sqlite3 CONFIG REQUIRED)
 
 # --- Core: no UI dependency ------------------------------------------------
 add_library(waffle_core STATIC
+  src/core/util.cpp
+  src/core/json.cpp
+  src/core/text_diff.cpp
   src/core/gguf_reader.cpp
   src/core/model_roots.cpp
   src/core/vram_planner.cpp
+  src/core/vram_verify.cpp
   src/core/telemetry.cpp
   src/core/engine.cpp
   src/core/bench.cpp
@@ -96,8 +100,11 @@ if(APPLE)
 endif()
 
 # --- Command-line tool ------------------------------------------------------
+add_library(waffle_cli STATIC src/cli/cli.cpp)
+target_link_libraries(waffle_cli PUBLIC waffle_core)
+target_include_directories(waffle_cli PUBLIC src)
 add_executable(waffle src/cli/main.cpp)
-target_link_libraries(waffle PRIVATE waffle_core)
+target_link_libraries(waffle PRIVATE waffle_cli)
 include(GNUInstallDirs)
 install(TARGETS waffle RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
@@ -109,6 +116,7 @@ if(WAFFLE_BUILD_UI)
     src/ui/app.cpp
     src/ui/theme.cpp
     src/ui/widgets.cpp
+    src/ui/platform.cpp
     src/ui/views/library_view.cpp
     src/ui/views/vram_view.cpp
     src/ui/views/bench_view.cpp
@@ -124,7 +132,7 @@ if(WAFFLE_BUILD_UI)
   add_executable(waffle_gui WIN32 ${WAFFLE_UI_SOURCES})
   target_link_libraries(waffle_gui PRIVATE waffle_core imgui::imgui implot::implot)
   if(WIN32)
-    target_link_libraries(waffle_gui PRIVATE d3d11 dxgi)
+    target_link_libraries(waffle_gui PRIVATE d3d11 dxgi ole32 shell32)
   else()
     find_package(glfw3 CONFIG REQUIRED)
     find_package(OpenGL REQUIRED)
@@ -169,9 +177,30 @@ if(WAFFLE_BUILD_TESTS)
     tests/test_comparator.cpp
     tests/test_store.cpp
     tests/test_telemetry.cpp
+    tests/test_cli.cpp
+    tests/test_json.cpp
   )
-  target_link_libraries(waffle_tests PRIVATE waffle_core Catch2::Catch2WithMain)
+  target_link_libraries(waffle_tests PRIVATE waffle_core waffle_cli Catch2::Catch2WithMain)
   target_compile_definitions(waffle_tests PRIVATE WAFFLE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
   include(Catch)
   catch_discover_tests(waffle_tests DISCOVERY_MODE PRE_TEST)
+endif()
+
+function(waffle_warnings target)
+  if(TARGET ${target})
+    if(MSVC)
+      target_compile_options(${target} PRIVATE /W4 /permissive-)
+    else()
+      target_compile_options(${target} PRIVATE -Wall -Wextra)
+    endif()
+  endif()
+endfunction()
+waffle_warnings(waffle_core)
+waffle_warnings(waffle_cli)
+waffle_warnings(waffle)
+if(TARGET waffle_gui)
+  waffle_warnings(waffle_gui)
+endif()
+if(TARGET waffle_tests)
+  waffle_warnings(waffle_tests)
 endif()

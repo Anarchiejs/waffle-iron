@@ -21,7 +21,7 @@ body:
     id: version
     attributes:
       label: Waffle Iron version
-      description: The version and llama.cpp string from the About box, or the output of `waffle --help`.
+      description: The version and llama.cpp string from the About box, or the output of `waffle --version`.
       placeholder: 0.1.0, llama.cpp …
     validations:
       required: true
@@ -32,14 +32,25 @@ body:
       options:
         - CPU
         - CUDA
+        - Metal
         - Not sure
     validations:
       required: true
-  - type: input
-    id: windows
+  - type: dropdown
+    id: os
     attributes:
-      label: Windows version
-      placeholder: Windows 11 24H2
+      label: Operating system
+      options:
+        - Windows
+        - Linux
+        - macOS
+    validations:
+      required: true
+  - type: input
+    id: os_version
+    attributes:
+      label: Operating system version
+      placeholder: Windows 11 24H2, Ubuntu 24.04, or macOS 15
     validations:
       required: true
   - type: input

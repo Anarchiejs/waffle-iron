@@ -100,7 +100,8 @@ bool nav_item(int page, const char* label, const char* glyph, bool use_font, boo
     return clicked;
 }
 } // namespace
-App::App(bool icons) : store_(Store::default_path()), ctx_{engine_, telemetry_, store_}, icons_(icons) {
+App::App(bool icons)
+    : store_(Store::default_path()), ctx_{engine_, telemetry_, store_, {}, -1, {}, {}, -1, {}}, icons_(icons) {
     views_ = {make_library_view(), make_vram_view(),    make_bench_view(),
               make_sampler_view(), make_compare_view(), make_monitor_view()};
     // Starting page (development screenshots: WAFFLE_PAGE=0..5).
@@ -172,8 +173,8 @@ void App::sidebar(float width, float height, bool compact) {
                 ImGui::PopFont();
                 meter(f, f > .9f ? col::bad : f > .75f ? col::amber : col::accent, -1, em(.32f));
                 if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("VRAM %s / %s", format_bytes(g.vram_used).c_str(),
-                                      format_bytes(g.vram_total).c_str());
+                    ImGui::SetTooltip("%s %s / %s", telemetry_.reports_process_memory() ? "Allocation" : "VRAM",
+                                      format_bytes(g.vram_used).c_str(), format_bytes(g.vram_total).c_str());
             }
         }
         ImGui::EndChild();
@@ -207,7 +208,8 @@ void App::sidebar(float width, float height, bool compact) {
             meter(f, f > .9f ? col::bad : f > .75f ? col::amber : col::accent, -1, em(.38f));
             push_font(nullptr, .84f);
             ImGui::PushStyleColor(ImGuiCol_Text, col::dim);
-            ImGui::Text("VRAM %s / %s", format_bytes(g.vram_used).c_str(), format_bytes(g.vram_total).c_str());
+            ImGui::Text("%s %s / %s", telemetry_.reports_process_memory() ? "Allocation" : "VRAM",
+                        format_bytes(g.vram_used).c_str(), format_bytes(g.vram_total).c_str());
             ImGui::Text("%u %%  ·  %u °C  ·  %.0f W", g.gpu_util_pct, g.temperature_c, g.power_w);
             ImGui::PopStyleColor();
             ImGui::PopFont();
@@ -263,8 +265,9 @@ void App::status_bar(float height) {
     if (!ctx_.gpu_history.empty()) {
         const auto& g = ctx_.gpu_history.back();
         char right[160];
-        std::snprintf(right, sizeof right, "%s   ·   VRAM %s / %s   ·   %u °C", telemetry_.device_name().c_str(),
-                      format_bytes(g.vram_used).c_str(), format_bytes(g.vram_total).c_str(), g.temperature_c);
+        std::snprintf(right, sizeof right, "%s   ·   %s %s / %s   ·   %u °C", telemetry_.device_name().c_str(),
+                      telemetry_.reports_process_memory() ? "Allocation" : "VRAM", format_bytes(g.vram_used).c_str(),
+                      format_bytes(g.vram_total).c_str(), g.temperature_c);
         const float w = ImGui::CalcTextSize(right).x;
         const float x = ImGui::GetWindowWidth() - w - em(1);
         if (x > ImGui::GetItemRectMax().x - wp.x + em(2)) {

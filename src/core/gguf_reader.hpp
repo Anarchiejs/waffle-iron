@@ -45,9 +45,11 @@ struct OllamaBlob {
 
 // nullopt if the file is not a blob referenced by an Ollama manifest.
 std::optional<OllamaBlob> find_ollama_blob(const std::filesystem::path& path);
+// Drops the manifest index so the next lookup rereads the manifests directory.
+void clear_ollama_cache();
 
 // Recursively walks directories and returns GGUF files (signature checked),
-// sorted by path. Skips unreadable files, "-0000N-of-" shards other than the first,
+// sorted by path. Skips unreadable files, "-<index>-of-<count>" shards whose index is not 1,
 // and Ollama blobs that are not a main model (draft models, projectors).
 std::vector<std::filesystem::path> scan_model_dirs(const std::vector<std::filesystem::path>& roots);
 

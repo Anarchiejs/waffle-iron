@@ -141,7 +141,8 @@ TEST_CASE("GGUF: metadata, tensors, and light read", "[gguf_reader]") {
 TEST_CASE("GGUF: errors and filtered recursive scan", "[gguf_reader]") {
     waffle::test::TempDir temp("l1_scan");
     std::filesystem::create_directories(temp.path / "sub");
-    for (const auto* name : {"blob", "model-00001-of-00002.gguf", "model-00002-of-00002.gguf", "mmproj-test.gguf"})
+    for (const auto* name : {"blob", "model-00001-of-00002.gguf", "model-00002-of-00002.gguf",
+                             "model-0001-of-0003.gguf", "model-0002-of-0003.gguf", "mmproj-test.gguf"})
         waffle::test::write_l1_model(temp.path / "sub" / name);
     const auto invalid = temp.path / "invalid.gguf";
     {
@@ -157,9 +158,10 @@ TEST_CASE("GGUF: errors and filtered recursive scan", "[gguf_reader]") {
         CHECK(std::string(e.what()).find(invalid.string()) != std::string::npos);
     }
     const auto paths = waffle::scan_model_dirs({temp.path, temp.path, temp.path / "absent"});
-    REQUIRE(paths.size() == 2);
+    REQUIRE(paths.size() == 3);
     CHECK(paths[0].filename() == "blob");
     CHECK(paths[1].filename() == "model-00001-of-00002.gguf");
+    CHECK(paths[2].filename() == "model-0001-of-0003.gguf");
     {
         std::ofstream file(invalid, std::ios::binary);
         file << "GGUF";

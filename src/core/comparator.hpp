@@ -24,7 +24,8 @@ struct CompareRequest {
     int max_tokens = 256;
     float temperature = 0.0f; // 0 = greedy (reproducible comparison)
     uint32_t seed = 42;
-    std::string perplexity_text; // empty = no perplexity
+    std::string perplexity_text;    // empty = no perplexity
+    uint32_t perplexity_stride = 0; // 0 = half the window
 };
 
 struct CompareOutput {
@@ -47,7 +48,8 @@ struct CompareResult {
 // Perplexity on the loaded model: text split into windows of n_ctx tokens (at most the loaded
 // context), log-likelihood on the second half of each window (as in llama-perplexity).
 // Throws Error if the text is shorter than 2 windows of 16 tokens.
-double compute_perplexity(EngineSession& session, std::string_view text, uint32_t n_ctx = 512);
+// stride 0 scores overlapping windows of n_ctx/2, the same spacing llama-perplexity uses by default.
+double compute_perplexity(EngineSession& session, std::string_view text, uint32_t n_ctx = 512, uint32_t stride = 0);
 
 // Generates on the loaded model. on_token receives each text piece (may be empty).
 CompareOutput generate_side(EngineSession& session, const CompareRequest& req,

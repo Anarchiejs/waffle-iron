@@ -24,6 +24,14 @@ struct SamplerSettings {
     float presence_penalty = 0.0f;
     int penalty_last_n = 64;
     uint32_t seed = 42;
+    bool mirostat_v2 = false;
+    float mirostat_tau = 5.0f;
+    float mirostat_eta = 0.1f;
+    bool dry = false;
+    float dry_multiplier = 0.8f;
+    float dry_base = 1.75f;
+    int dry_allowed_length = 2;
+    int dry_penalty_last_n = 256;
 
     bool operator==(const SamplerSettings&) const = default;
 };

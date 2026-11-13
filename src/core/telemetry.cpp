@@ -36,6 +36,7 @@ struct NvmlApi {
     nvmlReturn_t (*init)() = nullptr;
     nvmlReturn_t (*shutdown)() = nullptr;
     const char* (*error_string)(nvmlReturn_t) = nullptr;
+    nvmlReturn_t (*get_count)(unsigned int*) = nullptr;
     nvmlReturn_t (*get_handle)(unsigned int, nvmlDevice_t*) = nullptr;
     nvmlReturn_t (*get_name)(nvmlDevice_t, char*, unsigned int) = nullptr;
     nvmlReturn_t (*get_utilization)(nvmlDevice_t, nvmlUtilization_t*) = nullptr;
@@ -53,6 +54,8 @@ struct Telemetry::Impl {
     nvmlDevice_t device = nullptr;
     bool ok = false;
     bool apple_metal = false;
+    unsigned count = 0;
+    unsigned index = 0;
     std::string name;
     std::string error;
     std::mutex mutex;
@@ -81,6 +84,8 @@ struct Telemetry::Impl {
         name = probe.name;
         apple_metal = true;
         ok = true;
+        count = 1;
+        index = 0;
         return;
 #elif defined(_WIN32)
         lib = LoadLibraryA("nvml.dll");
@@ -110,13 +115,20 @@ struct Telemetry::Impl {
             error = std::string("nvmlInit failed: ") + api.error_string(rc);
             return;
         }
+        unsigned int reported = 0;
+        if (bind(api.get_count, "nvmlDeviceGetCount_v2") || bind(api.get_count, "nvmlDeviceGetCount")) {
+            if (api.get_count(&reported) == NVML_SUCCESS) count = reported;
+        }
+        if (count == 0) count = 1;
         if (nvmlReturn_t rc = api.get_handle(0, &device); rc != NVML_SUCCESS) {
             error = std::string("No NVIDIA GPU: ") + api.error_string(rc);
             api.shutdown();
+            count = 0;
             return;
         }
         char buf[96] = {};
         if (api.get_name(device, buf, sizeof buf) == NVML_SUCCESS) name = buf;
+        index = 0;
         ok = true;
     }
 
@@ -148,6 +160,28 @@ std::string Telemetry::device_name() const {
 }
 std::string Telemetry::error() const {
     return impl_->error;
+}
+unsigned Telemetry::device_count() const {
+    return impl_->count;
+}
+unsigned Telemetry::device_index() const {
+    return impl_->index;
+}
+bool Telemetry::reports_process_memory() const {
+    return impl_->apple_metal;
+}
+bool Telemetry::select_device(unsigned index) {
+    if (!impl_->ok) return false;
+    if (impl_->apple_metal) return index == 0;
+    if (index >= impl_->count) return false;
+    std::lock_guard lock(impl_->mutex);
+    nvmlDevice_t device = nullptr;
+    if (impl_->api.get_handle(index, &device) != NVML_SUCCESS) return false;
+    impl_->device = device;
+    impl_->index = index;
+    char buf[96] = {};
+    if (impl_->api.get_name(device, buf, sizeof buf) == NVML_SUCCESS) impl_->name = buf;
+    return true;
 }
 
 std::optional<GpuSample> Telemetry::sample() {
@@ -189,16 +223,27 @@ std::optional<GpuSample> Telemetry::sample() {
 
 struct VramPeakWatcher::Impl {
     std::atomic<uint64_t> peak{0};
+    std::atomic<uint64_t> baseline{0};
+    std::atomic<bool> have_baseline{false};
     std::jthread thread;
-    bool stopped = false;
+    std::atomic<bool> stopped{false};
 };
 
-VramPeakWatcher::VramPeakWatcher(Telemetry& telemetry, std::chrono::milliseconds interval)
+VramPeakWatcher::VramPeakWatcher(Telemetry& telemetry, std::chrono::milliseconds interval,
+                                 std::optional<uint64_t> baseline)
     : impl_(std::make_unique<Impl>()) {
+    if (baseline) {
+        impl_->baseline.store(*baseline);
+        impl_->have_baseline.store(true);
+    }
     if (!telemetry.available()) return;
     impl_->thread = std::jthread([this, &telemetry, interval](std::stop_token st) {
         while (!st.stop_requested()) {
             if (auto s = telemetry.sample()) {
+                if (!impl_->have_baseline.load()) {
+                    impl_->baseline.store(s->vram_used);
+                    impl_->have_baseline.store(true);
+                }
                 uint64_t prev = impl_->peak.load();
                 while (s->vram_used > prev && !impl_->peak.compare_exchange_weak(prev, s->vram_used)) {
                 }
@@ -213,14 +258,17 @@ VramPeakWatcher::~VramPeakWatcher() {
 }
 
 uint64_t VramPeakWatcher::stop() {
-    if (!impl_->stopped) {
-        impl_->stopped = true;
+    bool expected = false;
+    if (impl_->stopped.compare_exchange_strong(expected, true)) {
         if (impl_->thread.joinable()) {
             impl_->thread.request_stop();
             impl_->thread.join();
         }
     }
-    return impl_->peak.load();
+    if (!impl_->have_baseline.load()) return 0;
+    const uint64_t peak = impl_->peak.load();
+    const uint64_t baseline = impl_->baseline.load();
+    return peak > baseline ? peak - baseline : 0;
 }
 
 } // namespace waffle

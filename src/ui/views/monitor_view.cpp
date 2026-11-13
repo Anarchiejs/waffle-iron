@@ -101,6 +101,12 @@ public:
                         "set. Utilization, temperature, power, and clock are not published by Metal and stay at zero.");
         }
 #endif
+        if (ctx.telemetry.device_count() > 1) {
+            int index = static_cast<int>(ctx.telemetry.device_index());
+            ImGui::SetNextItemWidth(em(12));
+            if (ImGui::SliderInt("GPU", &index, 0, static_cast<int>(ctx.telemetry.device_count()) - 1))
+                ctx.telemetry.select_device(static_cast<unsigned>(index));
+        }
         // History window: segmented buttons.
         ImGui::AlignTextToFramePadding();
         ImGui::TextDisabled("Window");
@@ -143,9 +149,10 @@ public:
             std::snprintf(buf[3], 48, "%.1f W", g.power_w);
             std::snprintf(buf[4], 48, "%u MHz", g.sm_clock_mhz);
             tiles = {{"GPU load", buf[0], "", col::accent},
-                     {"VRAM used", format_bytes(g.vram_used), buf[1], col::teal},
+                     {ctx.telemetry.reports_process_memory() ? "This process" : "VRAM used", format_bytes(g.vram_used),
+                      buf[1], col::teal},
                      {"Temperature", buf[2], "", col::amber},
-                     {"Puissance", buf[3], "", col::mauve},
+                     {"Power", buf[3], "", col::mauve},
                      {"SM clock", buf[4], "", col::accent}};
         }
         {
@@ -159,9 +166,10 @@ public:
         const double vram_cap = total.empty() ? 0 : total.back();
         const Series series[] = {
             {"GPU load", "%", &t, &util, col::accent, 0, 100},
-            {"VRAM", "Go", &t, &used, col::teal, 0, std::max(1.0, vram_cap * 1.05), &total},
+            {ctx.telemetry.reports_process_memory() ? "Allocation" : "VRAM", "GiB", &t, &used, col::teal, 0,
+             std::max(1.0, vram_cap * 1.05), &total},
             {"Temperature", "°C", &t, &temp, col::amber, 0, 0},
-            {"Puissance", "W", &t, &power, col::mauve, 0, 0},
+            {"Power", "W", &t, &power, col::mauve, 0, 0},
             {"SM clock", "MHz", &t, &clock, col::accent, 0, 0},
             {"Generation throughput", "tok/s", &tx, &rate, col::good, 0, 0},
         };

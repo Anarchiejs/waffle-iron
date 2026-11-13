@@ -3,6 +3,8 @@
 #include "ui/theme.hpp"
 #include "ui/widgets.hpp"
 #include "core/gguf_reader.hpp"
+#include "core/util.hpp"
+#include "ui/platform.hpp"
 #include <imgui.h>
 #include <algorithm>
 #include <array>
@@ -37,7 +39,7 @@ public:
         if (!initialized_) {
             for (const auto& r : ctx.store.list_models()) {
                 ModelInfo m;
-                m.path = std::filesystem::u8path(r.path);
+                m.path = path_from_utf8(r.path);
                 m.file_name = r.file_name;
                 m.name = r.name;
                 m.architecture = r.architecture;
@@ -52,12 +54,27 @@ public:
                 if (is_language_model(m) && std::filesystem::exists(m.path, ec) && (!blob || blob->model))
                     ctx.library.push_back(std::move(m));
             }
+            for (const auto& root : ctx.store.library_roots()) extra_roots_.push_back(root);
             initialized_ = true;
+            rescan = true;
+        }
+        for (auto dropped : take_dropped_paths()) {
+            std::error_code ec;
+            if (std::filesystem::is_regular_file(dropped, ec)) dropped = dropped.parent_path();
+            if (!std::filesystem::is_directory(dropped, ec)) continue;
+            ctx.store.add_library_root(dropped);
+            extra_roots_.push_back(dropped);
             rescan = true;
         }
         if (is_ready(scan_)) {
             try {
                 auto result = scan_.get();
+                ctx.library.erase(std::remove_if(ctx.library.begin(), ctx.library.end(),
+                                                 [](const ModelInfo& model) {
+                                                     std::error_code ec;
+                                                     return !std::filesystem::is_regular_file(model.path, ec);
+                                                 }),
+                                  ctx.library.end());
                 for (auto& m : result.models) {
                     auto it = std::find_if(ctx.library.begin(), ctx.library.end(),
                                            [&](const auto& old) { return old.path == m.path; });
@@ -94,6 +111,7 @@ public:
                         result.errors.push_back(path_utf8(path.filename()) + " : " + e.what());
                     }
                 }
+                store->remove_missing_models();
                 return result;
             });
             rescan = false;
@@ -155,9 +173,16 @@ private:
 #else
             ImGui::InputTextWithHint("##Path", "~/models", folder_.data(), folder_.size());
 #endif
+            if (ImGui::Button("Browse...")) {
+                if (auto picked = pick_folder("Add a model folder")) {
+                    const auto text = utf8_from_path(*picked);
+                    std::snprintf(folder_.data(), folder_.size(), "%s", text.c_str());
+                }
+            }
             if (primary_button("Add and scan") && folder_[0]) {
-                auto p = std::filesystem::u8path(folder_.data());
+                auto p = path_from_utf8(folder_.data());
                 if (std::filesystem::is_directory(p)) {
+                    ctx.store.add_library_root(p);
                     extra_roots_.push_back(p);
                     rescan = true;
                     ImGui::CloseCurrentPopup();
@@ -247,6 +272,8 @@ private:
                             break;
                         case 5:
                             c = (x.context_length > y.context_length) - (x.context_length < y.context_length);
+                            break;
+                        default:
                             break;
                     }
                     return sort.SortDirection == ImGuiSortDirection_Ascending ? c < 0 : c > 0;

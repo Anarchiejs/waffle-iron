@@ -63,7 +63,8 @@ jobs:
           key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
 
       - name: Configure
-        run: cmake --preset cpu-release
+        # Portable ISA. -march=native plus a shared ccache faults on a different runner CPU.
+        run: cmake --preset cpu-release -DGGML_NATIVE=OFF
 
       - name: Build
         run: cmake --build --preset cpu-release --parallel 4
@@ -126,7 +127,8 @@ jobs:
           key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
 
       - name: Configure
-        run: cmake --preset cpu-release -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+        # Portable ISA. -march=native plus a shared ccache faults on a different runner CPU.
+        run: cmake --preset cpu-release -DGGML_NATIVE=OFF -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: clang-tidy
         run: |
@@ -190,7 +192,8 @@ jobs:
           key: vcpkg-asan-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
 
       - name: Configure
-        run: cmake --preset asan -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+        # Portable ISA. -march=native plus a shared ccache faults on a different runner CPU.
+        run: cmake --preset asan -DGGML_NATIVE=OFF -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
         run: cmake --build --preset asan --parallel 4
@@ -249,7 +252,8 @@ jobs:
           key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
 
       - name: Configure
-        run: cmake --preset cpu-release -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+        # Portable ISA. -march=native plus a shared ccache faults on a different runner CPU.
+        run: cmake --preset cpu-release -DGGML_NATIVE=OFF -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
         run: cmake --build --preset cpu-release --parallel 4

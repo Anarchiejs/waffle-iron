@@ -82,7 +82,7 @@ TEST_CASE("bench: stable exports and escaping", "[bench]") {
     cfg.load.n_gpu_layers = 99;
     cfg.load.type_k = cfg.load.type_v = "q8_0";
     cfg.load.flash_attn = 1;
-    CHECK(config_label(cfg) == "ngl=99 ctx=4096 kv=q8_0 fa=on ub=512");
+    CHECK(config_label(cfg) == "ngl=99 ctx=4096 kv=q8_0 fa=on ub=512 swa=full");
     cfg.load.flash_attn = -1;
     CHECK(config_label(cfg).find("fa=auto") != std::string::npos);
     cfg.load.flash_attn = 0;

@@ -4,10 +4,18 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   cpu:
     name: Windows CPU
     runs-on: windows-latest
+    timeout-minutes: 180
     steps:
       - name: Check out sources
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -19,9 +27,13 @@ jobs:
         run: |
           python -m pip install --disable-pip-version-check clang-format==21.1.2
           $files = Get-ChildItem -Path src,tests -Recurse -File |
-            Where-Object { $_.Extension -in '.cpp', '.hpp', '.h' }
+            Where-Object { $_.Extension -in '.cpp', '.hpp', '.h', '.mm' }
           if (-not $files) { throw 'No C++ sources found' }
           clang-format --dry-run --Werror -style=file $files.FullName
+
+      - name: Installer selection
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 -AutoTest
 
       - name: MSVC environment
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
@@ -62,6 +74,82 @@ jobs:
   cpu-linux:
     name: Linux CPU
     runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          submodules: recursive
+
+      - name: Check formatting
+        run: |
+          python3 -m pip install --disable-pip-version-check clang-format==21.1.2
+          files=$(find src tests -type f \( -name '*.cpp' -o -name '*.hpp' -o -name '*.h' -o -name '*.mm' \))
+          test -n "$files"
+          python3 -m pip show clang-format >/dev/null
+          "$HOME/.local/bin/clang-format" --dry-run --Werror -style=file $files
+
+      - name: Build packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build pkg-config zip ccache clang-tidy \
+            autoconf autoconf-archive automake libtool xutils-dev \
+            libgl1-mesa-dev libglu1-mesa-dev \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev \
+            libxi-dev libxext-dev libxxf86vm-dev xvfb
+
+      - name: ccache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/ccache
+          key: ccache-${{ runner.os }}-${{ github.sha }}
+          restore-keys: ccache-${{ runner.os }}-
+
+      - name: vcpkg
+        run: |
+          baseline=$(python3 -c 'import json; print(json.load(open("vcpkg.json"))["builtin-baseline"])')
+          test -n "$baseline"
+          git clone --filter=blob:none https://github.com/microsoft/vcpkg.git "$RUNNER_TEMP/vcpkg"
+          git -C "$RUNNER_TEMP/vcpkg" fetch --depth 1 origin "$baseline"
+          git -C "$RUNNER_TEMP/vcpkg" checkout --detach FETCH_HEAD
+          "$RUNNER_TEMP/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
+          echo "VCPKG_ROOT=$RUNNER_TEMP/vcpkg" >> "$GITHUB_ENV"
+
+      - name: Installer selection
+        run: bash scripts/install.sh --auto-test
+
+      - name: vcpkg binary cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: vcpkg_installed
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+
+      - name: Configure
+        run: cmake --preset cpu-release -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: clang-tidy
+        run: |
+          mapfile -t incs < <(g++ -E -x c++ - -v </dev/null 2>&1 | sed -n '/#include <...> search starts here:/,/End of search list./{ /search starts here/d; /End of search/d; s/^ //; p; }')
+          extra=()
+          for dir in "${incs[@]}"; do extra+=(--extra-arg="-isystem${dir}"); done
+          files=$(find src -type f -name '*.cpp' ! -name '*_win32.cpp')
+          clang-tidy -p build/cpu-release --warnings-as-errors='*' "${extra[@]}" $files
+
+      - name: Build
+        run: cmake --build --preset cpu-release --parallel 4
+
+      - name: Test
+        run: ctest --preset cpu-release
+
+      - name: Interface capture
+        run: xvfb-run -a env WAFFLE_CAPTURE=/tmp/waffle.bmp WAFFLE_CAPTURE_FRAMES=2 ./build/cpu-release/WaffleIron
+        continue-on-error: true
+
+  cpu-linux-asan:
+    name: Linux ASan
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
     steps:
       - name: Check out sources
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -72,56 +160,81 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            ninja-build pkg-config zip \
+            ninja-build pkg-config zip ccache \
             autoconf autoconf-archive automake libtool xutils-dev \
             libgl1-mesa-dev libglu1-mesa-dev \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev \
             libxi-dev libxext-dev libxxf86vm-dev
 
+      - name: ccache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/ccache
+          key: ccache-asan-${{ runner.os }}-${{ github.sha }}
+          restore-keys: ccache-asan-${{ runner.os }}-
+
       - name: vcpkg
         run: |
+          baseline=$(python3 -c 'import json; print(json.load(open("vcpkg.json"))["builtin-baseline"])')
+          test -n "$baseline"
           git clone --filter=blob:none https://github.com/microsoft/vcpkg.git "$RUNNER_TEMP/vcpkg"
-          git -C "$RUNNER_TEMP/vcpkg" fetch --depth 1 origin 0e5030f583a5427123cd3b714255e5ae62faa3ba
+          git -C "$RUNNER_TEMP/vcpkg" fetch --depth 1 origin "$baseline"
           git -C "$RUNNER_TEMP/vcpkg" checkout --detach FETCH_HEAD
           "$RUNNER_TEMP/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
           echo "VCPKG_ROOT=$RUNNER_TEMP/vcpkg" >> "$GITHUB_ENV"
-
-      - name: Installer selection
-        run: bash scripts/install.sh --auto-test
 
       - name: vcpkg binary cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: vcpkg_installed
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          key: vcpkg-asan-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
 
       - name: Configure
-        run: cmake --preset cpu-release
+        run: cmake --preset asan -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
-        run: cmake --build --preset cpu-release --parallel 4
+        run: cmake --build --preset asan --parallel 4
 
       - name: Test
-        run: ctest --preset cpu-release
+        run: ctest --preset asan
 
   cpu-macos:
     name: macOS CPU
     runs-on: macos-latest
+    timeout-minutes: 180
     steps:
       - name: Check out sources
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           submodules: recursive
 
+      - name: Check formatting
+        run: |
+          python3 -m pip install --user --disable-pip-version-check clang-format==21.1.2
+          export PATH="$HOME/.local/bin:$HOME/Library/Python/3.12/bin:$HOME/Library/Python/3.13/bin:$PATH"
+          files=$(find src tests -type f \( -name '*.cpp' -o -name '*.hpp' -o -name '*.h' -o -name '*.mm' \))
+          test -n "$files"
+          clang-format --dry-run --Werror -style=file $files
+
       - name: Build tools
         run: |
           if ! command -v ninja >/dev/null 2>&1; then brew install ninja; fi
           if ! command -v cmake >/dev/null 2>&1; then brew install cmake; fi
+          if ! command -v ccache >/dev/null 2>&1; then brew install ccache; fi
+
+      - name: ccache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/Library/Caches/ccache
+          key: ccache-${{ runner.os }}-${{ github.sha }}
+          restore-keys: ccache-${{ runner.os }}-
 
       - name: vcpkg
         run: |
+          baseline=$(python3 -c 'import json; print(json.load(open("vcpkg.json"))["builtin-baseline"])')
+          test -n "$baseline"
           git clone --filter=blob:none https://github.com/microsoft/vcpkg.git "$RUNNER_TEMP/vcpkg"
-          git -C "$RUNNER_TEMP/vcpkg" fetch --depth 1 origin 0e5030f583a5427123cd3b714255e5ae62faa3ba
+          git -C "$RUNNER_TEMP/vcpkg" fetch --depth 1 origin "$baseline"
           git -C "$RUNNER_TEMP/vcpkg" checkout --detach FETCH_HEAD
           "$RUNNER_TEMP/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
           echo "VCPKG_ROOT=$RUNNER_TEMP/vcpkg" >> "$GITHUB_ENV"
@@ -136,7 +249,7 @@ jobs:
           key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
 
       - name: Configure
-        run: cmake --preset cpu-release
+        run: cmake --preset cpu-release -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
         run: cmake --build --preset cpu-release --parallel 4

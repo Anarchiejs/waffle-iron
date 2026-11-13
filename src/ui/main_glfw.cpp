@@ -5,7 +5,9 @@
 #include <imgui_impl_opengl3.h>
 #include <implot.h>
 
+#include "core/util.hpp"
 #include "ui/app.hpp"
+#include "ui/platform.hpp"
 #include "ui/theme.hpp"
 
 #include <chrono>
@@ -224,6 +226,13 @@ int main() {
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
     GLFWwindow* window = glfwCreateWindow(1400, 900, "Waffle Iron", nullptr, nullptr);
+    if (window) {
+        glfwSetDropCallback(window, [](GLFWwindow*, int count, const char** paths) {
+            std::vector<std::filesystem::path> dropped;
+            for (int i = 0; i < count; ++i) dropped.push_back(waffle::path_from_utf8(paths[i]));
+            waffle::ui::push_dropped_paths(std::move(dropped));
+        });
+    }
     if (!window) {
         std::fprintf(stderr, "Cannot open a window. On Linux the interface needs X11 or XWayland and OpenGL.\n");
         glfwTerminate();
@@ -248,7 +257,7 @@ int main() {
     auto& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     const auto directory = executable_directory();
-    std::string ini = (directory / "imgui.ini").string();
+    std::string ini = waffle::narrow_utf8(directory / "imgui.ini");
     io.IniFilename = ini.c_str();
     const bool icons = waffle::ui::apply_theme(dpi, directory / "assets");
 
@@ -272,8 +281,8 @@ int main() {
                 glfwGetWindowContentScale(window, &xscale, &yscale);
                 const float next_dpi = !retina && xscale > 0.f ? xscale : 1.f;
                 if (next_dpi != current_dpi) {
-                    ImGui::GetStyle().ScaleAllSizes(next_dpi / current_dpi);
-                    ImGui::GetStyle().FontScaleMain = next_dpi / dpi;
+                    waffle::ui::apply_theme(next_dpi, directory / "assets");
+                    ImGui_ImplOpenGL3_DestroyDeviceObjects();
                     current_dpi = next_dpi;
                 }
                 ImGui_ImplOpenGL3_NewFrame();

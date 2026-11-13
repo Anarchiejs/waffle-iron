@@ -121,6 +121,8 @@ VramEstimate estimate_vram(const ModelInfo& model, const VramPlanInput& input) {
         result.overhead_gpu = cuda_overhead;
     } else
         result.compute_cpu = compute;
+    if (input.flash_attn_auto)
+        result.notes.push_back("Flash attention is automatic; the estimate assumes it is enabled");
     result.notes.push_back(
         "Compute buffers and CUDA overhead are approximate and should be checked against real measurements");
     if (model.n_expert) result.notes.push_back("MoE: every expert's weights are counted, including inactive experts");

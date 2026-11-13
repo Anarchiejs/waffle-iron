@@ -1,4 +1,6 @@
 #include "ui/theme.hpp"
+
+#include "core/util.hpp"
 #include <implot.h>
 #include <cstdlib>
 #include <vector>
@@ -90,7 +92,9 @@ bool apply_theme(float dpi, const std::filesystem::path& assets) {
     ImPlot::StyleColorsDark();
     auto& ps = ImPlot::GetStyle();
     static const ImVec4 plot_colors[] = {col::accent, col::teal, col::mauve, col::amber};
-    ps.Colormap = ImPlot::AddColormap("Waffle Iron", plot_colors, 4);
+    static int waffle_colormap = -1;
+    if (waffle_colormap < 0) waffle_colormap = ImPlot::AddColormap("Waffle Iron", plot_colors, 4);
+    ps.Colormap = waffle_colormap;
     ps.PlotPadding = {10 * dpi, 10 * dpi};
     ps.LabelPadding = {6 * dpi, 4 * dpi};
     ps.LegendPadding = {8 * dpi, 6 * dpi};
@@ -109,7 +113,14 @@ bool apply_theme(float dpi, const std::filesystem::path& assets) {
     // Fonts: Inter from assets when present, otherwise a platform UI font, then ImGui's built-in font.
     // Windows: Segoe UI, Cascadia Mono / Consolas. Linux: DejaVu or Liberation. macOS: Arial / Courier New.
     auto& io = ImGui::GetIO();
+    io.Fonts->Clear();
     const float size = 15.5f * dpi;
+    auto add_ttf = [&](const std::filesystem::path& file, float pixels, ImFontConfig* config = nullptr,
+                       const ImWchar* ranges = nullptr) -> ImFont* {
+        if (file.empty()) return nullptr;
+        const std::string utf8 = waffle::narrow_utf8(file);
+        return io.Fonts->AddFontFromFileTTF(utf8.c_str(), pixels, config, ranges);
+    };
     const auto win = windows_fonts();
     std::vector<std::filesystem::path> regular_fonts = {assets / "fonts/Inter-Regular.ttf", win / "segoeui.ttf"};
     std::vector<std::filesystem::path> semibold_fonts = {assets / "fonts/Inter-SemiBold.ttf", win / "seguisb.ttf"};
@@ -139,7 +150,7 @@ bool apply_theme(float dpi, const std::filesystem::path& assets) {
     const auto regular = first_existing(regular_fonts);
     const auto semibold = first_existing(semibold_fonts);
     const auto mono = first_existing(mono_fonts);
-    if (!regular.empty()) g_fonts.regular = io.Fonts->AddFontFromFileTTF(regular.string().c_str(), size);
+    if (!regular.empty()) g_fonts.regular = add_ttf(regular, size);
     if (!g_fonts.regular) {
         ImFontConfig cfg;
         cfg.SizePixels = size;
@@ -149,7 +160,7 @@ bool apply_theme(float dpi, const std::filesystem::path& assets) {
     if (const auto symbols = win / "seguisym.ttf"; std::filesystem::exists(symbols)) {
         ImFontConfig cfg;
         cfg.MergeMode = true;
-        io.Fonts->AddFontFromFileTTF(symbols.string().c_str(), size, &cfg);
+        add_ttf(symbols, size, &cfg);
     }
     bool merged = false;
     const auto icons = assets / "fonts/lucide.ttf";
@@ -169,11 +180,11 @@ bool apply_theme(float dpi, const std::filesystem::path& assets) {
         cfg.MergeMode = true;
         cfg.PixelSnapH = true;
         cfg.GlyphOffset.y = 0.5f * dpi;
-        merged = io.Fonts->AddFontFromFileTTF(icons.string().c_str(), size, &cfg, icon_ranges) != nullptr;
+        merged = add_ttf(icons, size, &cfg, icon_ranges) != nullptr;
     }
-    if (!semibold.empty()) g_fonts.semibold = io.Fonts->AddFontFromFileTTF(semibold.string().c_str(), size);
+    if (!semibold.empty()) g_fonts.semibold = add_ttf(semibold, size);
     if (!g_fonts.semibold) g_fonts.semibold = g_fonts.regular;
-    if (!mono.empty()) g_fonts.mono = io.Fonts->AddFontFromFileTTF(mono.string().c_str(), size);
+    if (!mono.empty()) g_fonts.mono = add_ttf(mono, size);
     if (!g_fonts.mono) g_fonts.mono = g_fonts.regular;
     io.FontDefault = g_fonts.regular;
     s.FontSizeBase = size;

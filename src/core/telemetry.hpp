@@ -19,8 +19,14 @@ public:
     Telemetry& operator=(const Telemetry&) = delete;
 
     bool available() const;
-    std::string device_name() const;   // "" if unavailable
-    std::string error() const;         // reason it is unavailable
+    std::string device_name() const; // "" if unavailable
+    std::string error() const;       // reason it is unavailable
+    unsigned device_count() const;   // 0 when unavailable; 1 on Metal
+    unsigned device_index() const;
+    // Metal reports this process allocation, not device-wide VRAM.
+    bool reports_process_memory() const;
+    // Switches the NVML device. Index 0 is the only Metal device. False when out of range.
+    bool select_device(unsigned index);
     std::optional<GpuSample> sample(); // thread-safe; nullopt if unavailable
 
 private:
@@ -28,12 +34,15 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-// Samples used VRAM at a regular interval on a thread and keeps the maximum.
+// Samples used memory on a thread. stop() returns the highest reading minus the baseline
+// (the optional baseline, otherwise the first sample). That is the increase over the watched
+// interval, not the absolute NVML level. 0 when telemetry has no sample.
 class VramPeakWatcher {
 public:
-    explicit VramPeakWatcher(Telemetry& telemetry, std::chrono::milliseconds interval = std::chrono::milliseconds(50));
+    explicit VramPeakWatcher(Telemetry& telemetry, std::chrono::milliseconds interval = std::chrono::milliseconds(50),
+                             std::optional<uint64_t> baseline = std::nullopt);
     ~VramPeakWatcher(); // stops the thread
-    uint64_t stop();    // stops and returns the peak in bytes (0 if NVML is unavailable)
+    uint64_t stop();    // stops and returns the increase in bytes
 
 private:
     struct Impl;

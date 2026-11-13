@@ -1,5 +1,6 @@
 #include "ui/widgets.hpp"
 
+#include "core/util.hpp"
 #include "core/vram_planner.hpp"
 #include "ui/app_context.hpp"
 #include "ui/theme.hpp"
@@ -16,31 +17,11 @@ void AppContext::notify(std::string text, bool error) {
 }
 
 std::string format_bytes(uint64_t bytes) {
-    char buf[32];
-    const double b = static_cast<double>(bytes);
-    if (bytes >= GiB)
-        std::snprintf(buf, sizeof buf, "%.2f GiB", b / GiB);
-    else if (bytes >= MiB)
-        std::snprintf(buf, sizeof buf, "%.0f MiB", b / MiB);
-    else if (bytes >= KiB)
-        std::snprintf(buf, sizeof buf, "%.0f KiB", b / KiB);
-    else
-        std::snprintf(buf, sizeof buf, "%llu B", static_cast<unsigned long long>(bytes));
-    return buf;
+    return waffle::format_bytes(bytes);
 }
 
 std::string format_count(uint64_t n) {
-    char buf[32];
-    const double v = static_cast<double>(n);
-    if (n >= 1'000'000'000ull)
-        std::snprintf(buf, sizeof buf, "%.2f G", v / 1e9);
-    else if (n >= 1'000'000ull)
-        std::snprintf(buf, sizeof buf, "%.0f M", v / 1e6);
-    else if (n >= 1'000ull)
-        std::snprintf(buf, sizeof buf, "%.1f k", v / 1e3);
-    else
-        std::snprintf(buf, sizeof buf, "%llu", static_cast<unsigned long long>(n));
-    return buf;
+    return waffle::format_count(n);
 }
 
 std::string format_duration_ms(double ms) {

@@ -1,3 +1,4 @@
+#include "core/util.hpp"
 #include "store/store.hpp"
 #include "test_helpers.hpp"
 
@@ -144,7 +145,10 @@ TEST_CASE("store: campaigns, history, and VRAM checks", "[store]") {
     const auto loaded = store.load_campaign(id);
     REQUIRE(loaded.size() == 3);
     CHECK(loaded[0].model_name == late.model_name);
-    CHECK(loaded[0].config.load == late.config.load);
+    auto expected_load = late.config.load;
+    expected_load.model_path = waffle::canonical_path(expected_load.model_path);
+    CHECK(loaded[0].config.load == expected_load);
+    CHECK(loaded[0].config.seed == late.config.seed);
     CHECK(loaded[0].config.n_prompt == 32);
     CHECK(loaded[0].config.n_gen == 8);
     CHECK(loaded[0].config.repetitions == 2);

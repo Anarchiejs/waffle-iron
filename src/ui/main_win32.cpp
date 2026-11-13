@@ -1,6 +1,7 @@
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <shellapi.h>
 #include <d3d11.h>
 #include <dxgi.h>
 #include <imgui.h>
@@ -8,7 +9,9 @@
 #include <imgui_impl_win32.h>
 #include <imgui_impl_dx11.h>
 #include "ui/app.hpp"
+#include "ui/platform.hpp"
 #include "ui/theme.hpp"
+#include "core/util.hpp"
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -155,6 +158,20 @@ LRESULT WINAPI window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_SYSCOMMAND:
             if ((wp & 0xfff0) == SC_KEYMENU) return 0;
             break;
+        case WM_DROPFILES: {
+            auto* drop = reinterpret_cast<HDROP>(wp);
+            const UINT count = DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
+            std::vector<std::filesystem::path> paths;
+            for (UINT i = 0; i < count; ++i) {
+                const UINT length = DragQueryFileW(drop, i, nullptr, 0);
+                std::wstring wide(length, L'\0');
+                DragQueryFileW(drop, i, wide.data(), length + 1);
+                paths.emplace_back(wide);
+            }
+            DragFinish(drop);
+            waffle::ui::push_dropped_paths(std::move(paths));
+            return 0;
+        }
         case WM_DESTROY:
             PostQuitMessage(0);
             return 0;
@@ -255,7 +272,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int show) {
     sd.OutputWindow = hwnd;
     sd.SampleDesc.Count = 1;
     sd.Windowed = TRUE;
-    sd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+    sd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
     D3D_FEATURE_LEVEL level;
     HRESULT hr = D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, nullptr, 0,
                                                D3D11_SDK_VERSION, &sd, &swap_chain, &device, &level, &context);
@@ -274,10 +291,11 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int show) {
     ImPlot::CreateContext();
     auto& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    wchar_t exe[MAX_PATH]{};
-    GetModuleFileNameW(nullptr, exe, MAX_PATH);
+    std::wstring exe(32768, L'\0');
+    const DWORD exe_len = GetModuleFileNameW(nullptr, exe.data(), static_cast<DWORD>(exe.size()));
+    exe.resize(exe_len);
     const auto directory = std::filesystem::path(exe).parent_path();
-    std::string ini = (directory / "imgui.ini").string();
+    std::string ini = waffle::narrow_utf8(directory / "imgui.ini");
     io.IniFilename = ini.c_str();
     const bool icons = waffle::ui::apply_theme(dpi, directory / "assets");
     bool win32_ok = ImGui_ImplWin32_Init(hwnd);
@@ -286,6 +304,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int show) {
     if (dx_ok) {
         ShowWindow(hwnd, show);
         UpdateWindow(hwnd);
+        DragAcceptFiles(hwnd, TRUE);
         try {
             waffle::ui::App app(icons);
             auto script = load_script();
@@ -311,8 +330,8 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int show) {
                 }
                 const float next_dpi = ImGui_ImplWin32_GetDpiScaleForHwnd(hwnd);
                 if (next_dpi > 0 && next_dpi != current_dpi) {
-                    ImGui::GetStyle().ScaleAllSizes(next_dpi / current_dpi);
-                    ImGui::GetStyle().FontScaleMain = next_dpi / dpi;
+                    waffle::ui::apply_theme(next_dpi, directory / "assets");
+                    ImGui_ImplDX11_InvalidateDeviceObjects();
                     current_dpi = next_dpi;
                 }
                 ImGui_ImplDX11_NewFrame();
@@ -335,10 +354,24 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int show) {
                     break;
                 }
                 hr = swap_chain->Present(1, 0);
-                if (hr == DXGI_STATUS_OCCLUDED)
+                if (hr == DXGI_STATUS_OCCLUDED) {
                     Sleep(10);
-                else if (FAILED(hr))
+                } else if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
+                    ImGui_ImplDX11_Shutdown();
+                    release_target();
+                    if (swap_chain) swap_chain->Release();
+                    if (context) context->Release();
+                    if (device) device->Release();
+                    swap_chain = nullptr;
+                    context = nullptr;
+                    device = nullptr;
+                    hr = D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, nullptr, 0,
+                                                       D3D11_SDK_VERSION, &sd, &swap_chain, &device, &level, &context);
+                    if (FAILED(hr) || !create_target() || !ImGui_ImplDX11_Init(device, context))
+                        throw std::runtime_error("The DirectX device was lost");
+                } else if (FAILED(hr)) {
                     throw std::runtime_error("The DirectX device was lost");
+                }
             }
         } catch (const std::exception& e) {
             MessageBoxA(hwnd, e.what(), "Waffle Iron", MB_ICONERROR);

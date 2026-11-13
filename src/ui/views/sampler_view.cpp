@@ -1,3 +1,4 @@
+#include "core/json.hpp"
 #include "core/sampler_lab.hpp"
 #include "ui/icons.hpp"
 #include "ui/theme.hpp"
@@ -78,7 +79,7 @@ class SamplerView final : public View {
         if (n.id == snapshot_.current) flags |= ImGuiTreeNodeFlags_Selected;
         ImGui::PushID(n.id);
         std::string label = n.parent < 0 ? "Prompt" : visible_piece(n.piece);
-        bool expanded = ImGui::TreeNodeEx("branche", flags, "%s", label.c_str());
+        bool expanded = ImGui::TreeNodeEx("branch", flags, "%s", label.c_str());
         if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen() && !future_.valid()) {
             remaining_ = 0;
             submit(ctx, 2, {}, n.id);
@@ -160,6 +161,16 @@ class SamplerView final : public View {
             });
         field_label("Seed");
         changed |= ImGui::InputScalar("##seed", ImGuiDataType_U32, &settings_.seed);
+        changed |= ImGui::Checkbox("Mirostat v2", &settings_.mirostat_v2);
+        if (settings_.mirostat_v2) {
+            changed |= ImGui::SliderFloat("##tau", &settings_.mirostat_tau, 0.1f, 10.f, "tau %.2f");
+            changed |= ImGui::SliderFloat("##eta", &settings_.mirostat_eta, 0.01f, 1.f, "eta %.2f");
+        }
+        changed |= ImGui::Checkbox("DRY", &settings_.dry);
+        if (settings_.dry) {
+            changed |= ImGui::SliderFloat("##drym", &settings_.dry_multiplier, 0.f, 2.f, "multiplier %.2f");
+            changed |= ImGui::SliderFloat("##dryb", &settings_.dry_base, 1.01f, 4.f, "base %.2f");
+        }
         dirty_ |= changed && started_;
     }
     void controls(AppContext& ctx) {
@@ -305,10 +316,10 @@ class SamplerView final : public View {
             if (hovered) draw->AddRect(pos, {pos.x + width, pos.y + height}, ImGui::GetColorU32(col::accent), r);
             if (ImGui::IsItemClicked()) submit(ctx, 1, c.token);
             if (hovered)
-                ImGui::SetTooltip("Token %d · logit %.3f\nBrut %.4f %% · Final %.4f %%", c.token, c.logit,
+                ImGui::SetTooltip("Token %d · logit %.3f\nRaw %.4f %% · Final %.4f %%", c.token, c.logit,
                                   100. * c.p_raw, 100. * c.p_final);
             const float ty = pos.y + (height - ImGui::GetTextLineHeight()) * .5f;
-            char number[8];
+            char number[16];
             std::snprintf(number, sizeof number, "%d", ++rank);
             const float nw = ImGui::CalcTextSize(number).x;
             draw->AddText({bar_x - em(.5f) - nw, ty}, ImGui::GetColorU32(col::dim), number);
@@ -403,6 +414,29 @@ public:
         if (snapshot_.nodes.empty()) {
             dim_wrapped("The choice tree appears here.");
             return;
+        }
+        if (ImGui::SmallButton("Export JSON")) {
+            std::vector<Json> nodes;
+            for (const auto& n : snapshot_.nodes) {
+                std::vector<Json> children;
+                for (int child : n.children) children.push_back(Json::number_value(child));
+                nodes.push_back(Json::object_value({
+                    {"id", Json::number_value(n.id)},
+                    {"parent", Json::number_value(n.parent)},
+                    {"token", Json::number_value(n.token)},
+                    {"piece", Json::string_value(n.piece)},
+                    {"probability", Json::number_value(n.p_final)},
+                    {"depth", Json::number_value(n.depth)},
+                    {"children", Json::array_value(std::move(children))},
+                }));
+            }
+            const Json document = Json::object_value({
+                {"current", Json::number_value(snapshot_.current)},
+                {"text", Json::string_value(snapshot_.text)},
+                {"nodes", Json::array_value(std::move(nodes))},
+            });
+            ImGui::SetClipboardText(document.dump().c_str());
+            ctx.notify("Tree copied");
         }
         for (const auto& n : snapshot_.nodes)
             if (n.parent < 0) tree(ctx, n.id);

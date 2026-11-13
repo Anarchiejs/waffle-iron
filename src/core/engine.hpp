@@ -121,7 +121,8 @@ public:
         return fut;
     }
 
-    // Cancels the current job and clears the queue (waiting futures receive Cancelled).
+    // Requests stop on the current job and on every queued job. The queue itself is not cleared:
+    // each job still runs, sees the stop request, and throws Cancelled. Waiting futures receive that.
     void cancel_all();
     EngineState state() const;
     size_t pending() const;

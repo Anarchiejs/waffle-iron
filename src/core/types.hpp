@@ -110,6 +110,8 @@ struct VramPlanInput {
     bool flash_attn = true;
     uint32_t n_seq = 1;
     bool swa_full = true;
+    // True when the caller asked for automatic flash attention. The estimate still assumes it is on.
+    bool flash_attn_auto = false;
 };
 
 struct VramEstimate {
@@ -149,6 +151,7 @@ struct BenchConfig {
     uint32_t n_gen = 128;    // generated tokens measured (tg)
     int repetitions = 5;
     int warmup = 1; // discarded runs before measurement
+    uint32_t seed = 42;
 };
 
 struct BenchSample {

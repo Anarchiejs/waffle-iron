@@ -76,6 +76,8 @@ public:
     void set_model_tags(const std::string& path, const std::vector<std::string>& tags);
     void set_model_notes(const std::string& path, const std::string& notes);
     void remove_missing_models(); // deletes records whose file no longer exists
+    void add_library_root(const std::filesystem::path& root);
+    std::vector<std::filesystem::path> library_roots() const;
 
     // --- Benchmark
     int64_t save_campaign(const std::string& name, const std::vector<BenchResult>& results);

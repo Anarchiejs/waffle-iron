@@ -255,7 +255,7 @@ waffle scan [folders…]         index GGUF models
 waffle list                    list the library
 waffle info <model>            GGUF metadata
 waffle plan <model> --ctx 8192 --ctk q8_0 --ctv q8_0 --fa 1 [--swa-full 0] [--verify]
-waffle bench <model> --ngl 0,20,99 --ctx 4096 --reps 5
+waffle bench <model> --ngl 0,20,99 --ctx 4096 --ubatch 512 --reps 5 --warmup 1 --seed 42
 waffle campaigns | history <model> | export <id> --md
 waffle gpu                     GPU state (NVML)
 ```
@@ -264,7 +264,7 @@ waffle gpu                     GPU state (NVML)
 
 `waffle plan --verify` actually loads the model, measures the VRAM it took, and prints the gap against the estimate, plus the allocations llama.cpp reported. That gap is for the GPU in the machine, not a portable specification.
 
-`waffle bench` accepts comma-separated lists for `--ngl`, `--ctx`, `--ctk`, `--fa`, `--pp`, `--tg`, and `--reps`. The campaign is saved and the Markdown table is printed. `waffle export <id> --csv -o file.csv` or `--md` writes a campaign back out.
+`waffle bench` accepts comma-separated lists for `--ngl`, `--ctx`, `--ctk`, `--fa`, `--ubatch`, `--pp`, `--tg`, and `--reps`. `--ctv` sets the V cache when `--ctk` is omitted. `--swa-full`, `--threads`, `--warmup`, and `--seed` set one value. Extra model paths are measured with the same grid. The campaign is saved and the Markdown table is printed. `waffle export <id> --csv`, `--md`, or `--json` writes a campaign back out, and `waffle import file.json` reads a JSON campaign. `waffle --version` prints the waffle and llama.cpp versions. `waffle ppl MODEL --file text.txt` prints perplexity. `waffle gpu` exits non-zero when telemetry is unavailable.
 
 ## Advanced build
 
@@ -422,4 +422,4 @@ These environment variables are read on the local machine. They do not send anyt
 
 ## License
 
-Waffle Iron is MIT. The text is in `LICENSE` (copyright 2026 Anarchy). Third-party terms are in `THIRD_PARTY.md`. The included Lucide font is covered by `NOTICE`. Optional fonts, if you add them under `assets/fonts/`, keep their own licenses.
+Waffle Iron is MIT. The text is in `LICENSE` (copyright 2026 Anarchy). Third-party terms are in `THIRD_PARTY.md`. The included Lucide font is covered by `NOTICE`. Optional fonts, if you add them under `assets/fonts/`, keep their own licenses. Participation follows `CODE_OF_CONDUCT.md`.

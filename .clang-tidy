@@ -11,6 +11,15 @@ Checks: >
   -modernize-loop-convert,
   -modernize-pass-by-value,
   -modernize-avoid-bind,
+  -modernize-use-using,
+  -modernize-use-equals-delete,
+  -modernize-use-emplace,
+  -modernize-return-braced-init-list,
+  -modernize-use-auto,
+  -modernize-use-starts-ends-with,
+  -performance-inefficient-vector-operation,
+  -performance-unnecessary-value-param,
+  -performance-no-automatic-move,
   -bugprone-easily-swappable-parameters,
   -bugprone-narrowing-conversions,
   -bugprone-implicit-widening-of-multiplication-result,
@@ -18,5 +27,5 @@ Checks: >
   -performance-enum-size,
   -performance-avoid-endl
 WarningsAsErrors: ''
-HeaderFilterRegex: 'src/.*'
+HeaderFilterRegex: 'waffle-iron/src/'
 FormatStyle: file

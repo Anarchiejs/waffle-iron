@@ -50,11 +50,11 @@ std::string ollama_tag(const std::filesystem::path& relative) {
 
 std::filesystem::path profile_directory() {
 #ifdef _WIN32
-    if (const auto* home = std::getenv("USERPROFILE"); home && *home) return std::filesystem::path(home);
+    if (const auto* home = std::getenv("USERPROFILE"); home && *home) return {home};
     return {};
 #else
     // Unix sessions use HOME. USERPROFILE is a Windows variable and is ignored here.
-    if (const auto* home = std::getenv("HOME"); home && *home) return std::filesystem::path(home);
+    if (const auto* home = std::getenv("HOME"); home && *home) return {home};
     return {};
 #endif
 }

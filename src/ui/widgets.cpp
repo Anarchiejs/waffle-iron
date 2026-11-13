@@ -196,7 +196,7 @@ bool busy_indicator(const char* label, float fraction) {
     const float button = ImGui::CalcTextSize("Cancel").x + ImGui::GetStyle().FramePadding.x * 2;
     if (fraction < 0.0f) {
         // Indeterminate bar: a segment that travels back and forth.
-        const float t = static_cast<float>(ImGui::GetTime());
+        const auto t = static_cast<float>(ImGui::GetTime());
         fraction = 0.5f + 0.5f * std::sin(t * 3.0f);
     }
     ImGui::ProgressBar(std::clamp(fraction, 0.0f, 1.0f), ImVec2(-(button + ImGui::GetStyle().ItemSpacing.x), 0.0f),

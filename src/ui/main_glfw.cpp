@@ -80,18 +80,18 @@ void step_script(Script& sc, ImGuiIO& io) {
         sc.mouse = {x, y};
         io.AddMousePosEvent(x, y);
         if (cmd == "click") {
-            sc.pending.push_back([](ImGuiIO&) {});
-            sc.pending.push_back([](ImGuiIO& i) { i.AddMouseButtonEvent(0, true); });
-            sc.pending.push_back([](ImGuiIO&) {});
-            sc.pending.push_back([](ImGuiIO& i) { i.AddMouseButtonEvent(0, false); });
-            sc.pending.push_back([](ImGuiIO&) {});
+            sc.pending.emplace_back([](ImGuiIO&) {});
+            sc.pending.emplace_back([](ImGuiIO& i) { i.AddMouseButtonEvent(0, true); });
+            sc.pending.emplace_back([](ImGuiIO&) {});
+            sc.pending.emplace_back([](ImGuiIO& i) { i.AddMouseButtonEvent(0, false); });
+            sc.pending.emplace_back([](ImGuiIO&) {});
         }
     } else if (cmd == "scroll") {
         float x = 0, y = 0, d = 0;
         line >> x >> y >> d;
         sc.mouse = {x, y};
         io.AddMousePosEvent(x, y);
-        sc.pending.push_back([d](ImGuiIO& i) { i.AddMouseWheelEvent(0, d); });
+        sc.pending.emplace_back([d](ImGuiIO& i) { i.AddMouseWheelEvent(0, d); });
     } else if (cmd == "type") {
         std::string text;
         std::getline(line, text);
@@ -103,7 +103,7 @@ void step_script(Script& sc, ImGuiIO& io) {
         if (k == "ctrl+a") {
             io.AddKeyEvent(ImGuiMod_Ctrl, true);
             io.AddKeyEvent(ImGuiKey_A, true);
-            sc.pending.push_back([](ImGuiIO& i) {
+            sc.pending.emplace_back([](ImGuiIO& i) {
                 i.AddKeyEvent(ImGuiKey_A, false);
                 i.AddKeyEvent(ImGuiMod_Ctrl, false);
             });
@@ -112,7 +112,7 @@ void step_script(Script& sc, ImGuiIO& io) {
                                  : k == "backspace" ? ImGuiKey_Backspace
                                                     : ImGuiKey_Escape;
             io.AddKeyEvent(key, true);
-            sc.pending.push_back([key](ImGuiIO& i) { i.AddKeyEvent(key, false); });
+            sc.pending.emplace_back([key](ImGuiIO& i) { i.AddKeyEvent(key, false); });
         }
     } else if (cmd == "shot") {
         line >> shot_path;
@@ -229,6 +229,7 @@ int main() {
     if (window) {
         glfwSetDropCallback(window, [](GLFWwindow*, int count, const char** paths) {
             std::vector<std::filesystem::path> dropped;
+            if (count > 0) dropped.reserve(static_cast<size_t>(count));
             for (int i = 0; i < count; ++i) dropped.push_back(waffle::path_from_utf8(paths[i]));
             waffle::ui::push_dropped_paths(std::move(dropped));
         });

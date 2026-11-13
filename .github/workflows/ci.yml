@@ -83,11 +83,11 @@ jobs:
 
       - name: Check formatting
         run: |
-          python3 -m pip install --disable-pip-version-check clang-format==21.1.2
+          python3 -m venv "$RUNNER_TEMP/fmt"
+          "$RUNNER_TEMP/fmt/bin/pip" install --disable-pip-version-check clang-format==21.1.2
           files=$(find src tests -type f \( -name '*.cpp' -o -name '*.hpp' -o -name '*.h' -o -name '*.mm' \))
           test -n "$files"
-          python3 -m pip show clang-format >/dev/null
-          "$HOME/.local/bin/clang-format" --dry-run --Werror -style=file $files
+          "$RUNNER_TEMP/fmt/bin/clang-format" --dry-run --Werror -style=file $files
 
       - name: Build packages
         run: |
@@ -210,11 +210,11 @@ jobs:
 
       - name: Check formatting
         run: |
-          python3 -m pip install --user --disable-pip-version-check clang-format==21.1.2
-          export PATH="$HOME/.local/bin:$HOME/Library/Python/3.12/bin:$HOME/Library/Python/3.13/bin:$PATH"
+          python3 -m venv "$RUNNER_TEMP/fmt"
+          "$RUNNER_TEMP/fmt/bin/pip" install --disable-pip-version-check clang-format==21.1.2
           files=$(find src tests -type f \( -name '*.cpp' -o -name '*.hpp' -o -name '*.h' -o -name '*.mm' \))
           test -n "$files"
-          clang-format --dry-run --Werror -style=file $files
+          "$RUNNER_TEMP/fmt/bin/clang-format" --dry-run --Werror -style=file $files
 
       - name: Build tools
         run: |

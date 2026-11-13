@@ -229,8 +229,8 @@ bool EngineSession::is_eog(llama_token token) const {
 std::string EngineSession::apply_chat_template(std::string_view user_message) const {
     if (!model_) throw Error("No model loaded");
     const char* tmpl = llama_model_chat_template(model_, nullptr);
-    if (!tmpl) return std::string(user_message);
-    const std::string content(user_message);
+    if (!tmpl) return {user_message.begin(), user_message.end()};
+    std::string content(user_message);
     llama_chat_message msg{"user", content.c_str()};
     std::vector<char> buf(content.size() * 2 + 256);
     int32_t n = llama_chat_apply_template(tmpl, &msg, 1, true, buf.data(), static_cast<int32_t>(buf.size()));
@@ -240,7 +240,7 @@ std::string EngineSession::apply_chat_template(std::string_view user_message) co
     }
     // Jinja template not recognized by the non-Jinja build: fall back to the raw text.
     if (n < 0) return content;
-    return std::string(buf.data(), static_cast<size_t>(n));
+    return {buf.data(), static_cast<size_t>(n)};
 }
 
 void EngineSession::clear_memory() {
@@ -317,7 +317,7 @@ Engine::Engine() : session_(new EngineSession()) {
         llama_log_set(log_callback, nullptr);
         llama_backend_init();
     });
-    thread_ = std::jthread([this](std::stop_token st) { run(st); });
+    thread_ = std::jthread([this](const std::stop_token& st) { run(st); });
 }
 
 Engine::~Engine() {
@@ -368,7 +368,7 @@ void Engine::set_log_sink(std::function<void(int, std::string_view)> sink) {
     g_log_sink = std::move(sink);
 }
 
-void Engine::run(std::stop_token thread_stop) {
+void Engine::run(const std::stop_token& thread_stop) {
     for (;;) {
         std::shared_ptr<Queued> item;
         {

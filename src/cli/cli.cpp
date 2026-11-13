@@ -251,7 +251,7 @@ Invocation parse_invocation(const std::vector<std::string>& args) {
         if (arg == "--db") {
             if (i + 1 >= args.size()) throw waffle::Error("Missing value for --db");
             invocation.db = path_from_utf8(args[++i]);
-        } else if (arg.rfind("--db=", 0) == 0) {
+        } else if (arg.starts_with("--db=")) {
             if (arg.size() == 5) throw waffle::Error("Missing value for --db");
             invocation.db = path_from_utf8(arg.substr(5));
         } else {
@@ -293,7 +293,7 @@ struct FlagParser {
                 if (i + 1 >= args_.size()) throw waffle::Error("Missing value for " + name);
                 value = args_[i + 1];
                 erase_count = 2;
-            } else if (arg.rfind(name + "=", 0) == 0) {
+            } else if (arg.starts_with(name + "=")) {
                 value = arg.substr(name.size() + 1);
                 if (value->empty()) throw waffle::Error("Missing value for " + name);
             }
@@ -775,6 +775,7 @@ int cmd_campaigns(waffle::Store& store, const std::vector<std::string>& args) {
         return 0;
     }
     std::vector<std::vector<std::string>> rows;
+    rows.reserve(campaigns.size());
     for (const auto& campaign : campaigns) {
         rows.push_back({std::to_string(campaign.id), campaign.created_at, std::to_string(campaign.n_results),
                         campaign.model_names, campaign.name});
@@ -957,7 +958,7 @@ bool wants_version(const std::vector<std::string>& args) {
             ++i;
             continue;
         }
-        if (args[i].rfind("--db=", 0) == 0) continue;
+        if (args[i].starts_with("--db=")) continue;
         if (args[i] == "--version" || args[i] == "-V") return true;
     }
     return false;

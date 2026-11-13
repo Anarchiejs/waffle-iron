@@ -75,7 +75,7 @@ VramEstimate estimate_vram(const ModelInfo& model, const VramPlanInput& input) {
                                        [](const TensorInfo& t) { return t.name == "token_embd.weight"; });
         if (embd != model.tensors.end()) {
             result.weights_gpu = add(result.weights_gpu, embd->n_bytes);
-            result.notes.push_back("Tied embeddings: token_embd is also copied to the GPU");
+            result.notes.emplace_back("Tied embeddings: token_embd is also copied to the GPU");
         }
     }
     // The array summary keeps the size even without the values.
@@ -106,8 +106,8 @@ VramEstimate estimate_vram(const ModelInfo& model, const VramPlanInput& input) {
         target = add(target, bytes);
     }
     if (model.shared_kv_layers)
-        result.notes.push_back(std::to_string(model.shared_kv_layers) +
-                               " layers reuse the KV cache of earlier layers (no cache of their own)");
+        result.notes.emplace_back(std::to_string(model.shared_kv_layers) +
+                                  " layers reuse the KV cache of earlier layers (no cache of their own)");
     // Activations and logits in f32 per micro-batch. Without flash attention, materialize
     // attention scores: micro-batch × context × heads × sizeof(float).
     const uint64_t ubatch = std::min({input.n_ubatch, input.n_batch, input.n_ctx});
@@ -122,12 +122,13 @@ VramEstimate estimate_vram(const ModelInfo& model, const VramPlanInput& input) {
     } else
         result.compute_cpu = compute;
     if (input.flash_attn_auto)
-        result.notes.push_back("Flash attention is automatic; the estimate assumes it is enabled");
-    result.notes.push_back(
+        result.notes.emplace_back("Flash attention is automatic; the estimate assumes it is enabled");
+    result.notes.emplace_back(
         "Compute buffers and CUDA overhead are approximate and should be checked against real measurements");
-    if (model.n_expert) result.notes.push_back("MoE: every expert's weights are counted, including inactive experts");
+    if (model.n_expert)
+        result.notes.emplace_back("MoE: every expert's weights are counted, including inactive experts");
     if (!input.flash_attn && (input.type_v != "f16" && input.type_v != "f32" && input.type_v != "bf16"))
-        result.notes.push_back("A quantized V cache requires flash attention at load time");
+        result.notes.emplace_back("A quantized V cache requires flash attention at load time");
     (void)add(add(result.weights_gpu, result.kv_cache_gpu), add(result.compute_gpu, result.overhead_gpu));
     (void)add(add(result.weights_cpu, result.kv_cache_cpu), result.compute_cpu);
     return result;

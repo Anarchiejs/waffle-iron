@@ -237,7 +237,7 @@ VramPeakWatcher::VramPeakWatcher(Telemetry& telemetry, std::chrono::milliseconds
         impl_->have_baseline.store(true);
     }
     if (!telemetry.available()) return;
-    impl_->thread = std::jthread([this, &telemetry, interval](std::stop_token st) {
+    impl_->thread = std::jthread([this, &telemetry, interval](const std::stop_token& st) {
         while (!st.stop_requested()) {
             if (auto s = telemetry.sample()) {
                 if (!impl_->have_baseline.load()) {

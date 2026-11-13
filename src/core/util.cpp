@@ -12,12 +12,12 @@ namespace waffle {
 
 std::string utf8_from_path(const std::filesystem::path& path) {
     const auto u8 = path.u8string();
-    return std::string(reinterpret_cast<const char*>(u8.data()), u8.size());
+    return {reinterpret_cast<const char*>(u8.data()), u8.size()};
 }
 
 std::filesystem::path path_from_utf8(std::string_view utf8) {
     const std::u8string u8(reinterpret_cast<const char8_t*>(utf8.data()), utf8.size());
-    return std::filesystem::path(u8);
+    return {u8};
 }
 
 std::filesystem::path canonical_path(const std::filesystem::path& path) {
@@ -90,7 +90,7 @@ std::filesystem::path documents_directory() {
     const char* home = std::getenv("HOME");
     return (home && *home ? std::filesystem::path(home) : std::filesystem::current_path()) / "Documents";
 #else
-    if (const char* xdg = std::getenv("XDG_DOCUMENTS_DIR"); xdg && *xdg) return std::filesystem::path(xdg);
+    if (const char* xdg = std::getenv("XDG_DOCUMENTS_DIR"); xdg && *xdg) return {xdg};
     const char* home = std::getenv("HOME");
     std::filesystem::path documents =
         (home && *home ? std::filesystem::path(home) : std::filesystem::current_path()) / "Documents";

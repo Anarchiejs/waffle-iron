@@ -29,10 +29,16 @@ static std::string visible_piece(const std::string& piece) {
     }
     return result;
 }
-// Token color from its probability at the moment of the choice: red (rare) toward green (sure).
-ImU32 probability_color(float p) {
+// Token color from its probability at the moment of the choice: raspberry (rare), syrup, then mint (sure).
+ImVec4 probability_color4(float p) {
     p = std::sqrt(std::clamp(p, 0.f, 1.f));
-    return ImGui::ColorConvertFloat4ToU32(ImVec4(1.f - .6f * p, .45f + .5f * p, .5f, 1));
+    auto mix = [](const ImVec4& a, const ImVec4& b, float t) {
+        return ImVec4(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t, 1);
+    };
+    return p < .5f ? mix(col::bad, col::accent, p * 2) : mix(col::accent, col::mint, p * 2 - 1);
+}
+ImU32 probability_color(float p) {
+    return ImGui::ColorConvertFloat4ToU32(probability_color4(p));
 }
 class SamplerView final : public View {
     int model_ = -1, generate_n_ = 32, remaining_ = 0, seen_selection_ = -1;
@@ -161,12 +167,12 @@ class SamplerView final : public View {
             });
         field_label("Seed");
         changed |= ImGui::InputScalar("##seed", ImGuiDataType_U32, &settings_.seed);
-        changed |= ImGui::Checkbox("Mirostat v2", &settings_.mirostat_v2);
+        changed |= checkbox("Mirostat v2", &settings_.mirostat_v2);
         if (settings_.mirostat_v2) {
             changed |= ImGui::SliderFloat("##tau", &settings_.mirostat_tau, 0.1f, 10.f, "tau %.2f");
             changed |= ImGui::SliderFloat("##eta", &settings_.mirostat_eta, 0.01f, 1.f, "eta %.2f");
         }
-        changed |= ImGui::Checkbox("DRY", &settings_.dry);
+        changed |= checkbox("DRY", &settings_.dry);
         if (settings_.dry) {
             changed |= ImGui::SliderFloat("##drym", &settings_.dry_multiplier, 0.f, 2.f, "multiplier %.2f");
             changed |= ImGui::SliderFloat("##dryb", &settings_.dry_base, 1.01f, 4.f, "base %.2f");
@@ -190,7 +196,7 @@ class SamplerView final : public View {
         const bool has_parent = current != snapshot_.nodes.end() && current->parent >= 0;
         ImGui::SameLine();
         ImGui::BeginDisabled(!has_parent || busy());
-        if (ImGui::Button("Retour au parent") && has_parent) submit(ctx, 2, {}, current->parent);
+        if (ImGui::Button("Back to parent") && has_parent) submit(ctx, 2, {}, current->parent);
         ImGui::EndDisabled();
         if (busy()) {
             ImGui::SameLine();
@@ -204,7 +210,7 @@ class SamplerView final : public View {
         } else if (snapshot_.at_eog) {
             ImGui::SameLine();
             ImGui::AlignTextToFramePadding();
-            badge("end of generation", col::amber);
+            badge("end of generation", col::butter);
         }
     }
     void generated_text() {
@@ -213,7 +219,7 @@ class SamplerView final : public View {
         {
             const char* legend = "probability:  low";
             push_font(nullptr, .85f);
-            const float lw = ImGui::CalcTextSize(legend).x + em(5) + ImGui::CalcTextSize("forte").x + em(1);
+            const float lw = ImGui::CalcTextSize(legend).x + em(5) + ImGui::CalcTextSize("high").x + em(1);
             const ImVec2 back = ImGui::GetCursorPos();
             ImGui::SetCursorPos(
                 {ImGui::GetWindowContentRegionMax().x - lw, ImGui::GetStyle().WindowPadding.y + em(.1f)});
@@ -228,7 +234,7 @@ class SamplerView final : public View {
             }
             ImGui::Dummy({bw, ImGui::GetTextLineHeight()});
             ImGui::SameLine();
-            ImGui::TextDisabled("forte");
+            ImGui::TextDisabled("high");
             ImGui::PopFont();
             ImGui::SetCursorPos(back);
         }
@@ -251,39 +257,16 @@ class SamplerView final : public View {
             return;
         }
         ImGui::BeginChild("colored text", ImVec2(0, 0), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
-        const ImVec2 origin = ImGui::GetCursorScreenPos();
-        ImVec2 cursor = origin;
-        const float right = origin.x + std::max(1.f, ImGui::GetContentRegionAvail().x - em(.5f));
-        const float line_height = ImGui::GetTextLineHeightWithSpacing();
-        auto* text_draw = ImGui::GetWindowDrawList();
+        // Each token on a tint of its probability color, the text itself in that color.
+        std::vector<TextSpan> spans;
+        spans.reserve(path.size());
         for (auto it = path.rbegin(); it != path.rend(); ++it) {
-            const ImU32 color = probability_color((*it)->p_final);
-            const auto& piece = (*it)->piece;
-            for (size_t i = 0; i < piece.size();) {
-                const auto c = static_cast<unsigned char>(piece[i]);
-                size_t bytes = c < 0x80 ? 1 : c < 0xe0 ? 2 : c < 0xf0 ? 3 : 4;
-                bytes = std::min(bytes, piece.size() - i);
-                const char* begin = piece.data() + i;
-                const char* end = begin + bytes;
-                if (c == '\n') {
-                    cursor.x = origin.x;
-                    cursor.y += line_height;
-                } else if (c != '\r') {
-                    float width = ImGui::CalcTextSize(begin, end).x;
-                    if (cursor.x + width > right && cursor.x > origin.x) {
-                        cursor.x = origin.x;
-                        cursor.y += line_height;
-                    }
-                    text_draw->AddText(cursor, color, begin, end);
-                    if (ImGui::IsWindowHovered() &&
-                        ImGui::IsMouseHoveringRect(cursor, ImVec2(cursor.x + width, cursor.y + line_height)))
-                        ImGui::SetTooltip("p = %.4f %%", 100. * (*it)->p_final);
-                    cursor.x += width;
-                }
-                i += bytes;
-            }
+            const ImVec4 color = probability_color4((*it)->p_final);
+            spans.push_back({(*it)->piece, color, alpha(color, .13f)});
         }
-        ImGui::Dummy(ImVec2(0, cursor.y - origin.y + line_height));
+        const int hovered = flow_text(spans);
+        if (hovered >= 0)
+            ImGui::SetTooltip("p = %.4f %%", 100. * path[path.size() - 1 - static_cast<size_t>(hovered)]->p_final);
         if (generating_step_) ImGui::SetScrollHereY(1.0f);
         ImGui::EndChild();
     }
@@ -305,12 +288,14 @@ class SamplerView final : public View {
             const float r = em(.3f);
             // Three columns: rank, bar (with the token text), percentage.
             const float bar_x = pos.x + em(1.8f), bar_w = std::max(em(4), width - em(1.8f) - em(5.2f));
-            draw->AddRectFilled({bar_x, pos.y}, {bar_x + bar_w, pos.y + height},
-                                ImGui::GetColorU32(ImVec4(1, 1, 1, .03f)), r);
+            // Track, pale raw-probability bar, then the final bar (syrup for the most likely, blueberry after).
+            draw->AddRectFilled({bar_x, pos.y}, {bar_x + bar_w, pos.y + height}, ImGui::GetColorU32(col::field), r);
             draw->AddRectFilled({bar_x, pos.y}, {bar_x + bar_w * std::clamp(c.p_raw, 0.f, 1.f), pos.y + height},
-                                IM_COL32(180, 190, 210, 45), r);
-            draw->AddRectFilled({bar_x, pos.y}, {bar_x + bar_w * std::clamp(c.p_final, 0.f, 1.f), pos.y + height},
-                                ImGui::GetColorU32(ImVec4(.34f, .37f, .68f, .9f)), r);
+                                ImGui::GetColorU32(alpha(col::dim, .22f)), r);
+            const float inset = height * .2f;
+            draw->AddRectFilled(
+                {bar_x, pos.y + inset}, {bar_x + bar_w * std::clamp(c.p_final, 0.f, 1.f), pos.y + height - inset},
+                ImGui::GetColorU32(rank == 0 ? alpha(col::accent, .85f) : alpha(col::blue, .7f)), r * .7f);
             ImGui::InvisibleButton("choose", ImVec2(width, height));
             const bool hovered = ImGui::IsItemHovered();
             if (hovered) draw->AddRect(pos, {pos.x + width, pos.y + height}, ImGui::GetColorU32(col::accent), r);
@@ -322,15 +307,16 @@ class SamplerView final : public View {
             char number[16];
             std::snprintf(number, sizeof number, "%d", ++rank);
             const float nw = ImGui::CalcTextSize(number).x;
-            draw->AddText({bar_x - em(.5f) - nw, ty}, ImGui::GetColorU32(col::dim), number);
+            draw->AddText({bar_x - em(.5f) - nw, ty}, ImGui::GetColorU32(col::faint), number);
             const auto label = visible_piece(c.piece);
             draw->PushClipRect({bar_x, pos.y}, {bar_x + bar_w, pos.y + height}, true);
             draw->AddText(fonts().mono, em(1), {bar_x + em(.6f), ty}, ImGui::GetColorU32(ImGuiCol_Text), label.c_str());
             draw->PopClipRect();
             char percent[24];
             std::snprintf(percent, sizeof percent, "%.2f %%", 100.f * c.p_final);
-            const float pw = ImGui::CalcTextSize(percent).x;
-            draw->AddText({pos.x + width - pw - em(.6f), ty}, ImGui::GetColorU32(col::text), percent);
+            const float pw = fonts().mono->CalcTextSizeA(em(.88f), FLT_MAX, 0, percent).x;
+            draw->AddText(fonts().mono, em(.88f), {pos.x + width - pw - em(.6f), ty + em(.06f)},
+                          ImGui::GetColorU32(col::soft), percent);
             ImGui::PopID();
         }
         ImGui::EndDisabled();

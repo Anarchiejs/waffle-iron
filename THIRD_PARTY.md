@@ -54,6 +54,8 @@ https://github.com/catchorg/Catch2
 
 Inter (`Inter-Regular.ttf`, `Inter-SemiBold.ttf`) is not included. If you add it, keep the SIL Open Font License 1.1 notice with any redistribution. https://github.com/rsms/inter
 
+Space Grotesk (`SpaceGrotesk-SemiBold.ttf` or `SpaceGrotesk-Medium.ttf`) and JetBrains Mono (`JetBrainsMono-Regular.ttf`) are not included either. Both are under the SIL Open Font License 1.1; keep that notice if you add and redistribute them. https://github.com/floriankarsten/space-grotesk, https://github.com/JetBrains/JetBrainsMono
+
 Without Inter, the interface uses a system font or Dear ImGui's built-in font. Sidebar icons fall back to drawn strokes when `lucide.ttf` is missing beside the binary.
 
 ## GLFW

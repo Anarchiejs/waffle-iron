@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- New interface theme, "Gaufrier": warm carbon background, a single syrup accent, values and paths in monospace. Every page is redrawn with it; no control or feature was removed.
+- The sidebar groups the pages as Understand (Library, VRAM planner), Measure (Bench, Monitor), and Tune (Sampler lab, Comparator). Ctrl+1 through Ctrl+6 follow that order, so Monitor moves to Ctrl+4, Sampler lab to Ctrl+5, and Comparator to Ctrl+6. The mark is a waffle grid.
+- Waffle charts: the VRAM planner's memory breakdown (96 cells = total VRAM, striped memory already in use, cells over capacity outlined), the Library's weight layout (100 cells), and cell meters for VRAM in the sidebar.
+- The comparator's word diff and the sampler's generated text flow as one paragraph with tinted spans. The sampler's "Retour au parent" button is now "Back to parent".
+- Optional fonts: Space Grotesk for page titles and JetBrains Mono for values, placed in `assets/fonts/` like Inter.
+
 - UTF-8 paths for model loads, GGUF names, fonts, and the interface settings file. The library key is the canonical path.
 - Benchmark results store the SWA cache mode and the seed. The history label includes them. VRAM peaks are the increase over the baseline, and the planner check shares one load-and-decode measurement with the command line.
 - `waffle --version`, `--ubatch`, `--swa-full`, `--threads`, `--warmup`, `--seed`, `--ctv`, JSON export and import, perplexity, and a non-zero exit when a scan or GPU sample fails.

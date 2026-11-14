@@ -20,6 +20,22 @@ public:
     virtual void tick(AppContext&) {}
 };
 
+// Page order in the sidebar, the Ctrl+1..6 shortcuts, and AppContext::requested_page.
+// Grouped as the README describes the tool: understand, measure, tune.
+enum Page : int {
+    page_library = 0,
+    page_vram = 1,
+    page_bench = 2,
+    page_monitor = 3,
+    page_sampler = 4,
+    page_compare = 5,
+    page_count = 6,
+};
+// Sidebar group of a page: "UNDERSTAND", "MEASURE" or "TUNE".
+inline const char* page_group(int page) {
+    return page <= page_vram ? "UNDERSTAND" : page <= page_monitor ? "MEASURE" : "TUNE";
+}
+
 std::unique_ptr<View> make_library_view();
 std::unique_ptr<View> make_vram_view();
 std::unique_ptr<View> make_bench_view();

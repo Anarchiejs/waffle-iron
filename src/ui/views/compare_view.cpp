@@ -42,7 +42,19 @@ class CompareView final : public View {
     Engine* engine_ = nullptr;
     std::future<CompareResult> future_;
     std::shared_ptr<CompareProgress> progress_ = std::make_shared<CompareProgress>();
-    static constexpr ImVec4 side_color(int i) { return i ? col::teal : col::accent; }
+    static constexpr ImVec4 side_color(int i) { return i ? col::accent : col::blue; }
+    // Solid A / B square, the side's color behind a dark letter.
+    static void side_mark(int i) {
+        const float s = ImGui::GetTextLineHeight() + em(.15f);
+        const ImVec2 p = ImGui::GetCursorScreenPos();
+        auto* dl = ImGui::GetWindowDrawList();
+        dl->AddRectFilled(p, {p.x + s, p.y + s}, ImGui::GetColorU32(side_color(i)), em(.3f));
+        const char* letter = i ? "B" : "A";
+        const ImVec2 t = fonts().semibold->CalcTextSizeA(em(.85f), FLT_MAX, 0, letter);
+        dl->AddText(fonts().semibold, em(.85f), {p.x + (s - t.x) * .5f, p.y + (s - t.y) * .5f},
+                    ImGui::GetColorU32(col::accent_ink), letter);
+        ImGui::Dummy({s, s});
+    }
     static void metric(const char* label, double a, double b, bool higher, const char* unit, bool valid_a,
                        bool valid_b) {
         ImGui::TableNextRow();
@@ -55,10 +67,12 @@ class CompareView final : public View {
             bool best =
                 valid[0] && valid[1] && a != b && (higher ? values[i] > values[1 - i] : values[i] < values[1 - i]);
             if (best) ImGui::PushStyleColor(ImGuiCol_Text, col::good);
+            push_font(fonts().mono, .92f);
             if (valid[i])
                 ImGui::Text(std::strcmp(unit, "tokens") ? "%.2f %s" : "%.0f %s", values[i], unit);
             else
                 ImGui::TextDisabled("Not measured");
+            ImGui::PopFont();
             if (best) {
                 ImGui::PopStyleColor();
                 ImGui::SameLine();
@@ -68,7 +82,7 @@ class CompareView final : public View {
     }
     void side_config(AppContext& ctx, int i) {
         ImGui::PushID(i);
-        badge(i ? "B" : "A", side_color(i));
+        side_mark(i);
         ImGui::SameLine();
         push_font(fonts().semibold, 1.06f);
         ImGui::TextUnformatted(i ? "Model B" : "Model A");
@@ -106,7 +120,7 @@ class CompareView final : public View {
             ImGui::InputTextMultiline("##reference", reference_, sizeof(reference_), ImVec2(-FLT_MIN, em(8)));
         }
         if (!loads_[0].model_path.empty() && loads_[0] == loads_[1]) {
-            ImGui::PushStyleColor(ImGuiCol_Text, col::amber);
+            ImGui::PushStyleColor(ImGuiCol_Text, col::warn);
             ImGui::TextWrapped("Warning: both sides are identical.");
             ImGui::PopStyleColor();
         }
@@ -157,7 +171,17 @@ class CompareView final : public View {
     void output(AppContext& ctx, int i, const std::string& text, ImVec2 size) {
         ImGui::PushID(i);
         if (begin_card("##output", size, ImGuiWindowFlags_NoScrollbar)) {
-            badge(i ? "B" : "A", side_color(i));
+            // Side color along the top edge of the card.
+            {
+                const ImVec2 wp = ImGui::GetWindowPos();
+                const float ww = ImGui::GetWindowWidth();
+                auto* dl = ImGui::GetWindowDrawList();
+                dl->PushClipRect(wp, {wp.x + ww, wp.y + em(.25f)}, false);
+                dl->AddRectFilled(wp, {wp.x + ww, wp.y + em(1)}, ImGui::GetColorU32(side_color(i)),
+                                  ImGui::GetStyle().ChildRounding);
+                dl->PopClipRect();
+            }
+            side_mark(i);
             ImGui::SameLine();
             const int index = models_[i];
             const std::string name = has_result_ ? (i ? result_.b : result_.a).model_name
@@ -213,14 +237,17 @@ class CompareView final : public View {
         if (va && vb && !a.text.empty() && !b.text.empty()) {
             ImGui::Dummy({0, em(.4f)});
             card_title("Word diff", "Green is only in B, red is only in A.");
+            // The diff flows as one paragraph: insertions on mint, deletions struck through on raspberry.
+            std::vector<TextSpan> spans;
             for (const auto& span : waffle::word_diff(a.text, b.text)) {
-                const ImVec4 color = span.op == waffle::DiffOp::Insert   ? col::good
-                                     : span.op == waffle::DiffOp::Delete ? col::bad
-                                                                         : col::text;
-                ImGui::PushStyleColor(ImGuiCol_Text, color);
-                ImGui::TextWrapped("%s", span.text.c_str());
-                ImGui::PopStyleColor();
+                if (span.op == waffle::DiffOp::Insert)
+                    spans.push_back({span.text, col::mint, alpha(col::mint, .16f)});
+                else if (span.op == waffle::DiffOp::Delete)
+                    spans.push_back({span.text, col::bad, alpha(col::bad, .16f), true});
+                else
+                    spans.push_back({span.text, col::soft});
             }
+            flow_text(spans);
         }
     }
 

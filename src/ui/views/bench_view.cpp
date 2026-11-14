@@ -146,13 +146,32 @@ class BenchView final : public View {
             also_.push_back(model_);
         for (size_t i = 0; i < also_.size();) {
             const int index = also_[i];
-            const char* label = index >= 0 && index < static_cast<int>(ctx.library.size())
-                                    ? ctx.library[static_cast<size_t>(index)].name.c_str()
-                                    : "?";
-            ImGui::TextUnformatted(label);
-            ImGui::SameLine();
+            const bool known = index >= 0 && index < static_cast<int>(ctx.library.size());
+            const char* label = known ? ctx.library[static_cast<size_t>(index)].name.c_str() : "?";
+            // One field-colored row per extra model: name, quantization, Remove on the right.
             ImGui::PushID(static_cast<int>(i));
-            if (ImGui::SmallButton("Remove"))
+            const float remove_w = ImGui::CalcTextSize("Remove").x + em(1.2f);
+            const ImVec2 p = ImGui::GetCursorScreenPos();
+            const float w = ImGui::GetContentRegionAvail().x;
+            const float h = ImGui::GetFrameHeight() + em(.3f);
+            auto* dl = ImGui::GetWindowDrawList();
+            dl->AddRectFilled(p, {p.x + w, p.y + h}, ImGui::GetColorU32(col::field), em(.5f));
+            dl->AddRect(p, {p.x + w, p.y + h}, ImGui::GetColorU32(col::border), em(.5f));
+            const float ty = p.y + (h - ImGui::GetTextLineHeight()) * .5f;
+            const float right = p.x + w - remove_w - em(.6f);
+            text_ellipsis(dl, nullptr, ImGui::GetFontSize(), {p.x + em(.7f), ty}, right - em(4),
+                          ImGui::GetColorU32(col::text), label);
+            if (known) {
+                const auto& type = ctx.library[static_cast<size_t>(index)].file_type;
+                const float qw = fonts().mono->CalcTextSizeA(em(.8f), FLT_MAX, 0, type.c_str()).x;
+                dl->AddText(fonts().mono, em(.8f), {right - qw, ty + em(.08f)}, ImGui::GetColorU32(col::dim),
+                            type.c_str());
+            }
+            ImGui::SetCursorScreenPos({p.x + w - remove_w - em(.3f), p.y + em(.15f)});
+            const bool removed = ImGui::Button("Remove", {remove_w, 0});
+            ImGui::SetCursorScreenPos({p.x, p.y + h + ImGui::GetStyle().ItemSpacing.y});
+            ImGui::Dummy({0, 0});
+            if (removed)
                 also_.erase(also_.begin() + static_cast<std::ptrdiff_t>(i));
             else
                 ++i;
@@ -210,7 +229,7 @@ class BenchView final : public View {
             const auto n = expand_grid(*parsed).size();
             char text[64];
             std::snprintf(text, sizeof text, n == 1 ? "%zu configuration" : "%zu configurations", n);
-            badge(text, col::accent);
+            badge(text, col::accent, true);
         } catch (const std::exception& e) {
             ImGui::PushStyleColor(ImGuiCol_Text, col::bad);
             ImGui::TextWrapped("%s", e.what());
@@ -303,8 +322,10 @@ class BenchView final : public View {
             ImGui::Dummy({0, em(.1f)});
             ImGui::TextDisabled("Shared:");
             ImGui::SameLine();
-            push_font(fonts().mono, .88f);
+            push_font(fonts().mono, .82f);
+            ImGui::PushStyleColor(ImGuiCol_Text, col::dim);
             ImGui::TextWrapped("%s", split.common.c_str());
+            ImGui::PopStyleColor();
             ImGui::PopFont();
         }
         ImGui::Dummy({0, em(.1f)});
@@ -335,16 +356,22 @@ class BenchView final : public View {
                 ImGui::TextUnformatted(split.rows[static_cast<size_t>(index - 1)].c_str());
                 ImGui::PopFont();
                 if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", full[static_cast<size_t>(index - 1)].c_str());
+                push_font(fonts().mono, .9f);
                 ImGui::TableNextColumn();
-                ImGui::Text("%.1f ± %.1f", r.pp.mean, r.pp.stddev);
+                ImGui::TextColored(col::blue, "%.1f ± %.1f", r.pp.mean, r.pp.stddev);
                 ImGui::TableNextColumn();
-                ImGui::Text("%.1f ± %.1f", r.tg.mean, r.tg.stddev);
+                ImGui::TextColored(col::accent, "%.1f ± %.1f", r.tg.mean, r.tg.stddev);
                 ImGui::TableNextColumn();
                 ImGui::TextUnformatted(format_duration_ms(r.ttft.mean).c_str());
                 ImGui::TableNextColumn();
-                ImGui::TextUnformatted(r.vram_peak ? format_bytes(r.vram_peak).c_str() : "Not measured");
+                if (r.vram_peak)
+                    ImGui::TextUnformatted(format_bytes(r.vram_peak).c_str());
+                else
+                    ImGui::TextDisabled("Not measured");
                 ImGui::TableNextColumn();
-                ImGui::Text("%zu / %zu / %zu", r.pp.outliers.size(), r.tg.outliers.size(), r.ttft.outliers.size());
+                ImGui::TextDisabled("%zu / %zu / %zu", r.pp.outliers.size(), r.tg.outliers.size(),
+                                    r.ttft.outliers.size());
+                ImGui::PopFont();
                 if (ImGui::IsItemHovered()) ImGui::SetTooltip("Dropped outliers: pp / tg / TTFT");
             }
             ImGui::EndTable();
@@ -456,15 +483,17 @@ class BenchView final : public View {
                 ImGui::TextUnformatted(record.name.c_str());
                 ImGui::TableNextColumn();
                 ImGui::AlignTextToFramePadding();
+                push_font(fonts().mono, .86f);
                 ImGui::TextDisabled("%s", record.created_at.c_str());
                 ImGui::TableNextColumn();
                 ImGui::AlignTextToFramePadding();
                 ImGui::Text("%d", record.n_results);
+                ImGui::PopFont();
                 ImGui::TableNextColumn();
                 ImGui::AlignTextToFramePadding();
                 ImGui::TextUnformatted(record.model_names.c_str());
                 ImGui::TableNextColumn();
-                if (ImGui::SmallButton("Load")) {
+                if (ImGui::Button("Load")) {
                     try {
                         output_.results = ctx.store.load_campaign(record.id);
                         output_.errors.clear();
@@ -474,11 +503,12 @@ class BenchView final : public View {
                     }
                 }
                 ImGui::SameLine();
-                if (ImGui::SmallButton("Delete")) ImGui::OpenPopup("Confirm");
+                if (danger_button("Delete")) ImGui::OpenPopup("Confirm");
                 if (ImGui::BeginPopup("Confirm")) {
                     ImGui::TextUnformatted("Delete this campaign?");
-                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(.55f, .22f, .25f, 1));
-                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(.68f, .28f, .31f, 1));
+                    ImGui::PushStyleColor(ImGuiCol_Button, alpha(col::bad, .85f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, col::bad);
+                    ImGui::PushStyleColor(ImGuiCol_Text, col::accent_ink);
                     if (ImGui::Button("Confirm deletion")) {
                         try {
                             ctx.store.delete_campaign(record.id);
@@ -488,7 +518,7 @@ class BenchView final : public View {
                             ctx.notify(e.what(), true);
                         }
                     }
-                    ImGui::PopStyleColor(2);
+                    ImGui::PopStyleColor(3);
                     ImGui::EndPopup();
                 }
                 ImGui::PopID();

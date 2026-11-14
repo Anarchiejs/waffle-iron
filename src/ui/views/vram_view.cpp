@@ -7,8 +7,8 @@
 #include "core/vram_planner.hpp"
 #include "core/vram_verify.hpp"
 #include <imgui.h>
-#include <implot.h>
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <future>
 #include <map>
@@ -144,62 +144,84 @@ class VramView final : public View {
         const uint64_t used = sample ? sample->vram_used : 0;
         const uint64_t free = capacity > used ? capacity - used : 0;
         std::vector<Tile> tiles = {{"GPU estimate", format_bytes(estimate.total_gpu()), "", col::accent},
-                                   {"Off GPU (RAM)", format_bytes(estimate.total_cpu()), "", col::teal}};
+                                   {"Off GPU (RAM)", format_bytes(estimate.total_cpu()), "", col::blue}};
         if (sample) {
             const int64_t margin = static_cast<int64_t>(free) - static_cast<int64_t>(estimate.total_gpu());
-            tiles.push_back({"Free VRAM", format_bytes(free), "/ " + format_bytes(capacity), col::mauve});
+            tiles.push_back({"Free VRAM", format_bytes(free), "/ " + format_bytes(capacity), col::berry});
             tiles.push_back({"Margin", signed_bytes(margin), margin >= 0 ? "it fits" : "over budget",
                              margin >= 0 ? col::good : col::bad});
         }
         tile_grid(tiles, em(7.5f));
         ImGui::Dummy({0, em(.1f)});
 
-        const float chart_h = std::clamp(ImGui::GetContentRegionAvail().y * .5f, em(15), em(24));
-        if (begin_card("##Breakdown", {0, chart_h}, ImGuiWindowFlags_NoScrollbar)) {
+        // Memory breakdown as a waffle: the GPU at a fixed cell size, so the grid is the card's capacity.
+        if (begin_card("##Breakdown")) {
             card_title("Memory breakdown");
-            ImPlot::PushStyleVar(ImPlotStyleVar_PlotPadding, ImVec2(0, em(.3f)));
-            if (ImPlot::BeginPlot("##Breakdown", {-1, ImGui::GetContentRegionAvail().y},
-                                  ImPlotFlags_NoTitle | ImPlotFlags_NoMenus | ImPlotFlags_NoBoxSelect)) {
-                ImPlot::SetupAxis(ImAxis_X1, nullptr, ImPlotAxisFlags_NoHighlight);
-                ImPlot::SetupAxis(ImAxis_Y1, nullptr, ImPlotAxisFlags_NoHighlight);
-                ImPlot::SetupAxisFormat(ImAxis_Y1, "%.1f GiB");
-                ImPlot::SetupLegend(ImPlotLocation_North, ImPlotLegendFlags_Outside | ImPlotLegendFlags_Horizontal |
-                                                              ImPlotLegendFlags_NoButtons);
-                ImPlot::SetupAxisLimits(ImAxis_X1, -.6, 1.6, ImPlotCond_Always);
-                const double ymax =
-                    static_cast<double>(std::max({estimate.total_gpu() + used, estimate.total_cpu(), capacity})) / GiB;
-                ImPlot::SetupAxisLimits(ImAxis_Y1, 0, std::max(1.0, ymax * 1.12), ImPlotCond_Always);
-                const double ticks[] = {0, 1};
-                const char* labels[] = {"GPU", "CPU"};
-                ImPlot::SetupAxisTicks(ImAxis_X1, ticks, 2, labels);
-                const char* components[] = {"Weights", "KV cache", "Buffers", "Overhead"};
-                const double data[] = {
-                    static_cast<double>(estimate.weights_gpu) / GiB,  static_cast<double>(estimate.weights_cpu) / GiB,
-                    static_cast<double>(estimate.kv_cache_gpu) / GiB, static_cast<double>(estimate.kv_cache_cpu) / GiB,
-                    static_cast<double>(estimate.compute_gpu) / GiB,  static_cast<double>(estimate.compute_cpu) / GiB,
-                    static_cast<double>(estimate.overhead_gpu) / GiB, 0};
-                ImPlotSpec stacked;
-                stacked.Flags = ImPlotBarGroupsFlags_Stacked;
-                ImPlot::PlotBarGroups(components, data, 4, 2, .55, 0, stacked);
-                // Horizontal thresholds drawn as full-width segments (easier to read than infinite lines).
-                const double span[] = {-.6, 1.6};
-                ImPlotSpec limit_line;
-                limit_line.LineWeight = 2;
-                if (capacity) {
-                    const double limit = static_cast<double>(capacity) / GiB;
-                    const double ys[] = {limit, limit};
-                    limit_line.LineColor = col::bad;
-                    ImPlot::PlotLine("Total VRAM", span, ys, 2, limit_line);
-                }
-                if (sample) {
-                    const double occupied = static_cast<double>(used) / GiB;
-                    const double ys[] = {occupied, occupied};
-                    limit_line.LineColor = col::dim;
-                    ImPlot::PlotLine("Already in use", span, ys, 2, limit_line);
-                }
-                ImPlot::EndPlot();
+            const std::vector<WaffleSlice> gpu = {
+                {"Already in use", format_bytes(used), static_cast<double>(used), ImVec4(.42f, .376f, .322f, 1), true},
+                {"Weights", format_bytes(estimate.weights_gpu), static_cast<double>(estimate.weights_gpu), col::accent},
+                {"KV cache", format_bytes(estimate.kv_cache_gpu), static_cast<double>(estimate.kv_cache_gpu),
+                 col::blue},
+                {"Buffers", format_bytes(estimate.compute_gpu), static_cast<double>(estimate.compute_gpu), col::mint},
+                {"Overhead", format_bytes(estimate.overhead_gpu), static_cast<double>(estimate.overhead_gpu),
+                 col::berry},
+            };
+            double need = 0;
+            for (const auto& slice : gpu) need += slice.amount;
+            // With a capacity, the grid is the whole card (empty cells are free memory, cells past it are
+            // outlined in raspberry). Without one, the grid only shows the estimate.
+            const double cap = capacity ? static_cast<double>(capacity) : need;
+            constexpr int cells = 96;
+            char scale[96];
+            std::snprintf(scale, sizeof scale, "GPU · 1 cell = %s · %d cells = %s",
+                          format_bytes(static_cast<uint64_t>(cap / cells)).c_str(), cells,
+                          capacity ? ("Total VRAM " + format_bytes(capacity)).c_str() : "the estimate");
+            push_font(fonts().mono, .8f);
+            ImGui::TextDisabled("%s", scale);
+            ImGui::PopFont();
+            waffle("##gpu", gpu, cells, 24, cap, em(1.6f));
+            auto legend = gpu;
+            if (!sample) legend.erase(legend.begin());
+            if (capacity)
+                legend.push_back({need > cap ? "Over budget" : "Free",
+                                  format_bytes(static_cast<uint64_t>(need > cap ? need - cap : cap - need)), 0,
+                                  need > cap ? col::bad : col::cell_off});
+            waffle_legend(legend);
+            // Off GPU: one stacked bar, same colors.
+            ImGui::Dummy({0, em(.2f)});
+            const ImVec2 p = ImGui::GetCursorScreenPos();
+            const float w = ImGui::GetContentRegionAvail().x;
+            const float label_w = em(3), value_w = em(6);
+            const float bar_w = std::max(em(4), w - label_w - value_w);
+            const float bar_h = em(.75f);
+            const float line = ImGui::GetTextLineHeight();
+            auto* dl = ImGui::GetWindowDrawList();
+            dl->AddLine({p.x, p.y}, {p.x + w, p.y}, ImGui::GetColorU32(col::border));
+            const float y = p.y + em(.6f);
+            dl->AddText({p.x, y}, ImGui::GetColorU32(col::dim), "CPU");
+            const ImVec2 b0{p.x + label_w, y + (line - bar_h) * .5f};
+            dl->AddRectFilled(b0, {b0.x + bar_w, b0.y + bar_h}, ImGui::GetColorU32(col::cell_off), em(.2f));
+            const auto cpu_total = static_cast<double>(estimate.total_cpu());
+            const double cpu_scale = std::max({cpu_total, cap, 1.0});
+            const std::pair<uint64_t, ImVec4> cpu_parts[] = {{estimate.weights_cpu, col::accent},
+                                                             {estimate.kv_cache_cpu, col::blue},
+                                                             {estimate.compute_cpu, col::mint}};
+            float x = b0.x;
+            for (const auto& [bytes, color] : cpu_parts) {
+                const float pw = bar_w * static_cast<float>(static_cast<double>(bytes) / cpu_scale);
+                if (pw <= 0) continue;
+                dl->AddRectFilled({x, b0.y}, {x + pw, b0.y + bar_h}, ImGui::GetColorU32(color));
+                x += pw;
             }
-            ImPlot::PopStyleVar();
+            const std::string cpu_text = format_bytes(estimate.total_cpu());
+            const float tw = fonts().mono->CalcTextSizeA(em(.88f), FLT_MAX, 0, cpu_text.c_str()).x;
+            dl->AddText(fonts().mono, em(.88f), {p.x + w - tw, y + em(.05f)}, ImGui::GetColorU32(col::dim),
+                        cpu_text.c_str());
+            ImGui::Dummy({w, line + em(.8f)});
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip(
+                    "Off GPU (RAM): weights %s · KV cache %s · buffers %s", format_bytes(estimate.weights_cpu).c_str(),
+                    format_bytes(estimate.kv_cache_cpu).c_str(), format_bytes(estimate.compute_cpu).c_str());
         }
         end_card();
 
@@ -207,9 +229,16 @@ class VramView final : public View {
             if (begin_card("##Notes")) {
                 card_title("Planner notes");
                 for (const auto& note : estimate.notes) {
-                    ImGui::Bullet();
-                    ImGui::SameLine();
+                    // Small syrup square as the bullet.
+                    const ImVec2 p = ImGui::GetCursorScreenPos();
+                    const float sq = em(.4f), line = ImGui::GetTextLineHeight();
+                    ImGui::GetWindowDrawList()->AddRectFilled({p.x, p.y + (line - sq) * .5f},
+                                                              {p.x + sq, p.y + (line + sq) * .5f},
+                                                              ImGui::GetColorU32(col::accent), em(.08f));
+                    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + sq + em(.6f));
+                    ImGui::PushStyleColor(ImGuiCol_Text, col::soft);
                     ImGui::TextWrapped("%s", note.c_str());
+                    ImGui::PopStyleColor();
                 }
             }
             end_card();
@@ -235,8 +264,8 @@ class VramView final : public View {
                     std::snprintf(gap, sizeof gap, "%+.1f %%",
                                   100 * (static_cast<double>(check.measured_gpu) / check.estimated_gpu - 1));
                 tile_grid(
-                    {{"Last measurement", measured ? format_bytes(check.measured_gpu) : "Not measured", "", col::teal},
-                     {"Gap, measured vs estimate", gap, "", col::amber}},
+                    {{"Last measurement", measured ? format_bytes(check.measured_gpu) : "Not measured", "", col::blue},
+                     {"Gap, measured vs estimate", gap, "", col::butter}},
                     em(11));
             }
             if (history_.empty())
@@ -255,24 +284,31 @@ class VramView final : public View {
                 for (const auto& check : history_) {
                     ImGui::TableNextRow();
                     ImGui::TableNextColumn();
+                    push_font(fonts().mono, .88f);
                     ImGui::TextUnformatted(check.timestamp.c_str());
+                    ImGui::PopFont();
                     ImGui::TableNextColumn();
                     push_font(fonts().mono, .85f);
                     ImGui::TextWrapped("%s", check.config.c_str());
                     ImGui::PopFont();
+                    push_font(fonts().mono, .92f);
                     ImGui::TableNextColumn();
                     ImGui::TextUnformatted(format_bytes(check.estimated_gpu).c_str());
                     ImGui::TableNextColumn();
                     if (memory_was_measured(check))
                         ImGui::TextUnformatted(format_bytes(check.measured_gpu).c_str());
                     else
-                        ImGui::TextUnformatted("Not measured");
+                        ImGui::TextDisabled("Not measured");
                     ImGui::TableNextColumn();
-                    if (memory_was_measured(check) && check.estimated_gpu)
-                        ImGui::Text("%+.1f %%",
-                                    100 * (static_cast<double>(check.measured_gpu) / check.estimated_gpu - 1));
-                    else
-                        ImGui::TextUnformatted("—");
+                    if (memory_was_measured(check) && check.estimated_gpu) {
+                        const double gap = 100 * (static_cast<double>(check.measured_gpu) / check.estimated_gpu - 1);
+                        ImGui::TextColored(std::abs(gap) < 5    ? col::good
+                                           : std::abs(gap) < 15 ? col::warn
+                                                                : col::bad,
+                                           "%+.1f %%", gap);
+                    } else
+                        ImGui::TextDisabled("—");
+                    ImGui::PopFont();
                 }
                 ImGui::EndTable();
             }

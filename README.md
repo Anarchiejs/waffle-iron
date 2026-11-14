@@ -173,7 +173,7 @@ The library database (see [Where the data lives](#where-the-data-lives)) is crea
 
 That scan runs again on every launch, even when the Library page is not the one on screen. There is no need to run `waffle scan` by hand for the first fill. **Rescan**, or Ctrl+R, starts it again after you add files.
 
-The sidebar lists the six pages. Ctrl+1 through Ctrl+6 switch pages. The status bar shows the work in progress, the GPU name, and VRAM when NVML answers.
+The sidebar lists the six pages in three groups: **Understand** (Library, VRAM planner), **Measure** (Bench, Monitor), and **Tune** (Sampler lab, Comparator). Ctrl+1 through Ctrl+6 switch pages in that order. The status bar shows the work in progress, the GPU name, and VRAM when NVML answers.
 
 A single thread talks to llama.cpp. The interface sends it work and keeps drawing during a load.
 
@@ -208,13 +208,13 @@ The names below are the page titles and the controls.
 
 Purpose: see what the machine already has, without loading the weights.
 
-Example. You have a Q4_K_M for everyday use and a Q8_0 to compare. After the scan, filter with the search field, click the Q4_K_M row, set the tag `everyday` and a note ("fits in 8 GB at 8k"), then **Save**. The weight-layout bar shows bytes per tensor type. **GGUF metadata** opens the GGUF keys, with a filter.
+Example. You have a Q4_K_M for everyday use and a Q8_0 to compare. After the scan, filter with the search field, click the Q4_K_M row, set the tag `everyday` and a note ("fits in 8 GB at 8k"), then **Save**. The weight-layout waffle shows bytes per tensor type: 100 cells, one cell per percent of the weights, with the size and share of each type underneath. **GGUF metadata** opens the GGUF keys, with a filter.
 
 ### VRAM planner
 
 Purpose: see where the memory goes before loading, then check it on the GPU.
 
-Example. Choose a Q4_K_M model. Set the context (4k, 8k, 32k…), the K cache and the V cache (`f16`, `q8_0`, `q4_0`…), flash attention, and **Full SWA cache**. The chart stacks weights, KV cache, buffers, and overhead, on the GPU and the CPU, with total VRAM and VRAM already in use. **Max layers that fit** suggests an offload that stays inside free memory. **Verify for real** loads the model, measures the gap, unloads it, and writes that into the history. The NVML sample is the whole GPU: another program can move it. The gap belongs to that machine.
+Example. Choose a Q4_K_M model. Set the context (4k, 8k, 32k…), the K cache and the V cache (`f16`, `q8_0`, `q4_0`…), flash attention, and **Full SWA cache**. The **Memory breakdown** waffle draws the GPU as 96 cells that add up to total VRAM: memory already in use (striped), weights, KV cache, buffers, and overhead, then free memory. Cells past the capacity are outlined in red. A bar under it shows what stays off the GPU, in RAM. **Max layers that fit** suggests an offload that stays inside free memory. **Verify for real** loads the model, measures the gap, unloads it, and writes that into the history. The NVML sample is the whole GPU: another program can move it. The gap belongs to that machine.
 
 Sliding-window models (Gemma): llama.cpp allocates the cache of those layers for the whole context by default (box checked, `--swa-full 1`). Unchecking **Full SWA cache** (`--swa-full 0`) limits it to the window and uses less VRAM at long context. Rewinding in the sequence is then no longer possible.
 
@@ -228,23 +228,23 @@ Three tabs: **Campaign**, **Results**, **History**.
 
 Example. Q4_K_M model, name "layers and context", GPU layers `0,20,99`, contexts `4096`, KV types `f16,q8_0`, flash attention `1`, ubatch `512`, 512 prompt tokens, 128 generated, 5 repetitions. The page reports how many configurations that is (the product of the lists, capped at 10,000). **Run campaign** runs the measurements. **Results** shows, for each setting, the mean and standard deviation of prefill (pp) and generation (tg), time to first token, peak VRAM, and outliers. **Save** stores the campaign. **CSV** or **Markdown** writes next to the path you give, by default under `Documents\WaffleIron`. **History** plots one model's throughput over time; hovering a point recalls the config and the llama.cpp version.
 
+### Monitor
+
+Purpose: the GPU while another page is working.
+
+The history window runs from 1 to 10 minutes. The curves cover GPU utilization, VRAM (and its capacity), temperature, power, SM clock, and the generation throughput published by the sampler lab. Without NVML, the page explains why (driver missing, no NVIDIA GPU) and the other pages stay usable.
+
 ### Sampler lab
 
 Purpose: see the next token, not only the final text.
 
-Example. Select the model, leave the prompt "Describe a landscape in spring." (or write your own), check **Chat template** if the GGUF has a chat template, then **Start**. Twenty candidates appear: a pale bar for the raw probability, an accent bar after temperature, top-k, top-p, min-p, and penalties. Click a candidate to force that token and open a branch. **Next step** lets the sampler decide. **Generate** runs several steps. The colored text follows the probability of the chosen token. The **Branches** tree jumps back to a node (the cache is recomputed). The sliders apply without reloading the model: temperature 0.8, top-k 40, top-p 0.95, min-p 0.05, seed 42 at the start.
+Example. Select the model, leave the prompt "Describe a landscape in spring." (or write your own), check **Chat template** if the GGUF has a chat template, then **Start**. Twenty candidates appear: a pale bar for the raw probability, an accent bar after temperature, top-k, top-p, min-p, and penalties. Click a candidate to force that token and open a branch. **Next step** lets the sampler decide. **Generate** runs several steps. The colored text follows the probability of the chosen token, from red (rare) through amber to green (sure). The **Branches** tree jumps back to a node (the cache is recomputed). The sliders apply without reloading the model: temperature 0.8, top-k 40, top-p 0.95, min-p 0.05, seed 42 at the start.
 
 ### Comparator
 
 Purpose: the same prompt, two models or two quantizations, one after the other so their VRAM is not added together.
 
 Example. Column A: the Q4_K_M. Column B: the Q8_0 of the same model. Prompt "Explain the water cycle in a few sentences.", 256 tokens, temperature 0, seed 42. **Run**. The texts fill in one after the other. The table marks with a star the best prefill throughput, the best generation throughput, the shortest load, and, if you check **Measure perplexity**, the lowest perplexity on the reference text (a neutral passage already in the field, which you can replace). A warning appears when both sides have exactly the same settings.
-
-### Monitor
-
-Purpose: the GPU while another page is working.
-
-The history window runs from 1 to 10 minutes. The curves cover GPU utilization, VRAM (and its capacity), temperature, power, SM clock, and the generation throughput published by the sampler lab. Without NVML, the page explains why (driver missing, no NVIDIA GPU) and the other pages stay usable.
 
 ## Command line
 
@@ -401,9 +401,11 @@ CI (`.github/workflows/ci.yml`) builds and tests the `cpu-release` preset on Win
 
 ## Fonts
 
-`lucide.ttf` is shipped in `assets/fonts/` and copied next to `WaffleIron` for every preset that builds the interface (`NOTICE` has the ISC and Feather terms). Inter is optional: place `Inter-Regular.ttf` and `Inter-SemiBold.ttf` in that same folder. Otherwise the interface uses a system font (Segoe UI on Windows, DejaVu or Liberation on Linux, Arial on macOS) and then ImGui's built-in font. Sidebar icons use the Lucide font when it was copied; without it they are drawn as strokes, because a missing private-use glyph shows up as a box.
+`lucide.ttf` is shipped in `assets/fonts/` and copied next to `WaffleIron` for every preset that builds the interface (`NOTICE` has the ISC and Feather terms). Three families are optional, placed in that same folder: Inter (`Inter-Regular.ttf`, `Inter-SemiBold.ttf`) for the text, Space Grotesk (`SpaceGrotesk-SemiBold.ttf` or `SpaceGrotesk-Medium.ttf`) for page titles, and JetBrains Mono (`JetBrainsMono-Regular.ttf`) for numbers and paths. Without Inter the interface uses a system font (Segoe UI on Windows, DejaVu or Liberation on Linux, Arial on macOS) and then ImGui's built-in font. Without Space Grotesk, titles use the semibold text font. Without JetBrains Mono, values use Cascadia Mono or Consolas on Windows, DejaVu Sans Mono or Liberation Mono on Linux, Courier New on macOS. Sidebar icons use the Lucide font when it was copied; without it they are drawn as strokes, because a missing private-use glyph shows up as a box.
 
 - Inter: https://github.com/rsms/inter (SIL Open Font License 1.1). Not included.
+- Space Grotesk: https://github.com/floriankarsten/space-grotesk (SIL Open Font License 1.1). Not included.
+- JetBrains Mono: https://github.com/JetBrains/JetBrainsMono (SIL Open Font License 1.1). Not included.
 - Lucide: https://github.com/lucide-icons/lucide (ISC, plus MIT for the Feather icons it incorporates). Included as `assets/fonts/lucide.ttf`.
 
 ## Developer switches
@@ -412,7 +414,7 @@ These environment variables are read on the local machine. They do not send anyt
 
 | Variable | Effect |
 |---|---|
-| `WAFFLE_PAGE` | Starting page, 0 through 5 |
+| `WAFFLE_PAGE` | Starting page, 0 through 5, in sidebar order (0 Library, 1 VRAM planner, 2 Bench, 3 Monitor, 4 Sampler lab, 5 Comparator) |
 | `WAFFLE_SELECT` | Preselect a library row by index |
 | `WAFFLE_SCRIPT` | Play a local UI script. The command list is in the comment at the top of `src/ui/main_win32.cpp` and `src/ui/main_glfw.cpp` |
 | `WAFFLE_CAPTURE` | Save a BMP of the window on disk, then quit |

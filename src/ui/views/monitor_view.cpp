@@ -24,13 +24,15 @@ class MonitorView final : public View {
     void chart(const Series& s, ImVec2 size) {
         ImGui::PushID(s.title);
         if (begin_card("##chart", size, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
-            push_font(fonts().semibold, .95f);
+            push_font(fonts().semibold, .9f);
+            ImGui::PushStyleColor(ImGuiCol_Text, col::soft);
             ImGui::TextUnformatted(s.title);
+            ImGui::PopStyleColor();
             ImGui::PopFont();
             if (!s.y->empty()) {
                 char value[48];
                 std::snprintf(value, sizeof value, "%.*f %s", std::abs(s.y->back()) < 10 ? 1 : 0, s.y->back(), s.unit);
-                push_font(fonts().semibold, .95f);
+                push_font(fonts().mono, 1.15f);
                 const float w = ImGui::CalcTextSize(value).x;
                 ImGui::SameLine(ImGui::GetContentRegionMax().x - w);
                 ImGui::PushStyleColor(ImGuiCol_Text, s.color);
@@ -64,7 +66,7 @@ class MonitorView final : public View {
                     ImPlot::PlotLine(s.ceiling ? "In use" : "##line", s.x->data(), s.y->data(), n, line);
                     if (s.ceiling) {
                         ImPlotSpec cap;
-                        cap.LineColor = col::faint;
+                        cap.LineColor = col::dim;
                         cap.LineWeight = 1.5f;
                         ImPlot::PlotLine("Capacity", s.x->data(), s.ceiling->data(), n, cap);
                     }
@@ -107,15 +109,19 @@ public:
             if (ImGui::SliderInt("GPU", &index, 0, static_cast<int>(ctx.telemetry.device_count()) - 1))
                 ctx.telemetry.select_device(static_cast<unsigned>(index));
         }
-        // History window: segmented buttons.
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextDisabled("Window");
-        for (int m : {1, 2, 5, 10}) {
+        // History window: a segmented control.
+        {
+            static const int choices[] = {1, 2, 5, 10};
+            static const char* const labels[] = {"1 min", "2 min", "5 min", "10 min"};
+            int index = 0;
+            for (int i = 0; i < 4; ++i)
+                if (choices[i] == minutes_) index = i;
+            ImGui::AlignTextToFramePadding();
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + em(.25f));
+            ImGui::TextDisabled("Window");
             ImGui::SameLine();
-            char label[16];
-            std::snprintf(label, sizeof label, "%d min", m);
-            const bool on = minutes_ == m;
-            if (on ? primary_button(label) : ImGui::Button(label)) minutes_ = m;
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() - em(.25f));
+            if (segmented("##window", labels, 4, index)) minutes_ = choices[index];
         }
         ImGui::Dummy({0, em(.1f)});
 
@@ -150,15 +156,15 @@ public:
             std::snprintf(buf[4], 48, "%u MHz", g.sm_clock_mhz);
             tiles = {{"GPU load", buf[0], "", col::accent},
                      {ctx.telemetry.reports_process_memory() ? "This process" : "VRAM used", format_bytes(g.vram_used),
-                      buf[1], col::teal},
-                     {"Temperature", buf[2], "", col::amber},
-                     {"Power", buf[3], "", col::mauve},
-                     {"SM clock", buf[4], "", col::accent}};
+                      buf[1], col::blue},
+                     {"Temperature", buf[2], "", col::berry},
+                     {"Power", buf[3], "", col::butter},
+                     {"SM clock", buf[4], "", col::mint}};
         }
         {
             char rate_text[32] = "—";
             if (!rate.empty()) std::snprintf(rate_text, sizeof rate_text, "%.1f", rate.back());
-            tiles.push_back({"Generation", rate_text, rate.empty() ? "none in progress" : "tok/s", col::good});
+            tiles.push_back({"Generation", rate_text, rate.empty() ? "none in progress" : "tok/s", col::accent});
         }
         tile_grid(tiles, em(7.5f));
         ImGui::Dummy({0, em(.2f)});
@@ -166,12 +172,12 @@ public:
         const double vram_cap = total.empty() ? 0 : total.back();
         const Series series[] = {
             {"GPU load", "%", &t, &util, col::accent, 0, 100},
-            {ctx.telemetry.reports_process_memory() ? "Allocation" : "VRAM", "GiB", &t, &used, col::teal, 0,
+            {ctx.telemetry.reports_process_memory() ? "Allocation" : "VRAM", "GiB", &t, &used, col::blue, 0,
              std::max(1.0, vram_cap * 1.05), &total},
-            {"Temperature", "°C", &t, &temp, col::amber, 0, 0},
-            {"Power", "W", &t, &power, col::mauve, 0, 0},
-            {"SM clock", "MHz", &t, &clock, col::accent, 0, 0},
-            {"Generation throughput", "tok/s", &tx, &rate, col::good, 0, 0},
+            {"Temperature", "°C", &t, &temp, col::berry, 0, 0},
+            {"Power", "W", &t, &power, col::butter, 0, 0},
+            {"SM clock", "MHz", &t, &clock, col::mint, 0, 0},
+            {"Generation throughput", "tok/s", &tx, &rate, col::accent, 0, 0},
         };
         const ImVec2 avail = ImGui::GetContentRegionAvail();
         const float gap = ImGui::GetStyle().ItemSpacing.x;

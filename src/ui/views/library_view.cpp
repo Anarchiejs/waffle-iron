@@ -154,14 +154,16 @@ private:
         const float right = avail - buttons;
         if (ImGui::GetCursorPosX() + ImGui::CalcTextSize(count).x + em(1) < right) {
             ImGui::AlignTextToFramePadding();
+            push_font(fonts().mono, .86f);
             ImGui::TextDisabled("%s", count);
+            ImGui::PopFont();
             ImGui::SameLine();
         }
         ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), right));
         if (ImGui::Button("Add a folder", {add_w, 0})) ImGui::OpenPopup("Model folder");
         ImGui::SameLine();
         ImGui::BeginDisabled(scan_.valid());
-        if (primary_button(scan_.valid() ? "Scanning..." : "Rescan", {scan_w, 0})) rescan = true;
+        if (ImGui::Button(scan_.valid() ? "Scanning..." : "Rescan", {scan_w, 0})) rescan = true;
         ImGui::EndDisabled();
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("Ctrl+R");
         ImGui::SetNextWindowSize({em(30), 0});
@@ -191,7 +193,23 @@ private:
             }
             ImGui::EndPopup();
         }
-        ImGui::Dummy({0, em(.2f)});
+        // Folders indexed besides the defaults, and the drop hint.
+        push_font(nullptr, .84f);
+        ImGui::PushStyleColor(ImGuiCol_Text, col::dim);
+        if (scan_.valid()) {
+            ImGui::TextUnformatted("Scanning the model folders...");
+        } else {
+            ImGui::TextUnformatted("Drop a folder or a .gguf file on the window to add its folder.");
+            for (const auto& root : extra_roots_) {
+                ImGui::SameLine(0, em(.6f));
+                const auto text = path_utf8(root);
+                if (ImGui::GetContentRegionAvail().x < ImGui::CalcTextSize(text.c_str()).x + em(1.5f)) break;
+                badge(text.c_str(), col::dim, true);
+            }
+        }
+        ImGui::PopStyleColor();
+        ImGui::PopFont();
+        ImGui::Dummy({0, em(.1f)});
     }
     void empty_library() {
         card_title("No model found", "On startup, Waffle Iron indexes the .gguf files in these folders:");
@@ -298,31 +316,43 @@ private:
                                       {0, row_h - em(.6f)}))
                     ctx.selected_model = static_cast<int>(i);
                 if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
-                    ctx.requested_page = 1;
+                    ctx.requested_page = page_vram;
                 if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
                     ImGui::SetTooltip("%s\n%s", model_title(m).c_str(), m.file_name.c_str());
+                if (selected) {
+                    // Syrup edge on the selected row.
+                    ImGui::GetWindowDrawList()->AddRectFilled({pos.x - em(.1f), pos.y - em(.3f)},
+                                                              {pos.x + em(.12f), pos.y + row_h - em(.3f)},
+                                                              ImGui::GetColorU32(col::accent));
+                }
                 // Name in semibold, file underneath; ellipsized to the column width.
                 const float max_x = pos.x + ImGui::GetColumnWidth();
                 auto* dl = ImGui::GetWindowDrawList();
-                text_ellipsis(dl, fonts().semibold, em(1), pos, max_x, ImGui::GetColorU32(col::text), model_title(m));
-                text_ellipsis(dl, fonts().regular, em(.84f), {pos.x, pos.y + line + 1}, max_x,
-                              ImGui::GetColorU32(col::dim), m.file_name);
+                const float tx = pos.x + em(.45f); // room for the selection edge
+                text_ellipsis(dl, fonts().semibold, em(1), {tx, pos.y}, max_x, ImGui::GetColorU32(col::text),
+                              model_title(m));
+                text_ellipsis(dl, fonts().mono, em(.78f), {tx, pos.y + line + 2}, max_x, ImGui::GetColorU32(col::dim),
+                              m.file_name);
                 const float middle = (row_h - em(.6f) - line) * .5f;
                 auto cell = [&] {
                     ImGui::TableNextColumn();
                     ImGui::SetCursorPosY(ImGui::GetCursorPosY() + middle);
                 };
                 cell();
+                ImGui::PushStyleColor(ImGuiCol_Text, col::soft);
                 ImGui::TextUnformatted(m.architecture.c_str());
+                ImGui::PopStyleColor();
                 cell();
-                ImGui::SetCursorPosY(ImGui::GetCursorPosY() - em(.08f));
-                badge(m.file_type.c_str(), col::accent);
+                ImGui::SetCursorPosY(ImGui::GetCursorPosY() - em(.1f));
+                badge(m.file_type.c_str(), col::blue, true);
+                push_font(fonts().mono, .92f);
                 cell();
                 ImGui::TextUnformatted(format_bytes(m.file_size).c_str());
                 cell();
                 ImGui::TextUnformatted(format_count(m.n_params).c_str());
                 cell();
                 ImGui::TextUnformatted(format_count(m.context_length).c_str());
+                ImGui::PopFont();
                 ImGui::PopID();
             }
             if (shown == 0) {
@@ -343,10 +373,14 @@ private:
                         "VRAM planner.");
             return;
         }
-        push_font(fonts().semibold, 1.25f);
+        badge(m->file_type.c_str(), col::blue, true);
+        ImGui::SameLine(0, em(.35f));
+        badge(m->architecture.c_str(), col::accent, true);
+        push_font(fonts().display, 1.4f);
         ImGui::TextWrapped("%s", model_title(*m).c_str());
         ImGui::PopFont();
-        push_font(fonts().mono, .8f);
+        ImGui::SetCursorPosY(ImGui::GetCursorPosY() - em(.2f));
+        push_font(fonts().mono, .78f);
         ImGui::PushStyleColor(ImGuiCol_Text, col::dim);
         ImGui::TextWrapped("%s", path_utf8(m->path).c_str());
         ImGui::PopStyleColor();
@@ -354,34 +388,47 @@ private:
         ImGui::Dummy({0, em(.15f)});
         const float gap = ImGui::GetStyle().ItemSpacing.x;
         const float half = (ImGui::GetContentRegionAvail().x - gap) * .5f;
-        if (primary_button("Plan VRAM", {half, 0})) ctx.requested_page = 1;
+        if (primary_button("Plan VRAM", {half, 0})) ctx.requested_page = page_vram;
         ImGui::SameLine(0, gap);
-        if (ImGui::Button("Open in sampler", {half, 0})) ctx.requested_page = 3;
+        if (ImGui::Button("Open in sampler", {half, 0})) ctx.requested_page = page_sampler;
         ImGui::Dummy({0, em(.25f)});
         char layers[32];
         std::snprintf(layers, sizeof layers, "%u", m->n_layer);
         tile_grid({{"Architecture", m->architecture, "", col::accent},
-                   {"Quantization", m->file_type, "", col::mauve},
-                   {"Size", format_bytes(m->file_size), "", col::teal},
-                   {"Parameters", format_count(m->n_params), "", col::amber},
+                   {"Quantization", m->file_type, "", col::blue},
+                   {"Size", format_bytes(m->file_size), "", col::mint},
+                   {"Parameters", format_count(m->n_params), "", col::berry},
                    {"Layers", layers, "", col::accent},
-                   {"Max context", format_count(m->context_length), "tokens", col::teal}},
+                   {"Max context", format_count(m->context_length), "tokens", col::blue}},
                   em(6.8f));
         if (!m->bytes_by_type.empty()) {
             section_header("WEIGHT LAYOUT");
             uint64_t total = 0;
             for (const auto& [type, bytes] : m->bytes_by_type) total += bytes;
-            static const ImVec4 colors[] = {col::accent, col::teal, col::mauve, col::amber};
+            static const ImVec4 colors[] = {col::accent, col::blue, col::mint, col::berry, col::butter};
+            // A 100-cell waffle (one cell = 1 % of the weights), then one line per tensor type.
+            std::vector<WaffleSlice> slices;
             int k = 0;
             for (const auto& [type, bytes] : m->bytes_by_type) {
                 const float f = total ? static_cast<float>(static_cast<double>(bytes) / total) : 0;
-                ImGui::TextUnformatted(type.c_str());
                 char value[64];
-                std::snprintf(value, sizeof value, "%s  ·  %.0f %%", format_bytes(bytes).c_str(), 100.0 * f);
-                ImGui::SameLine(ImGui::GetContentRegionMax().x - ImGui::CalcTextSize(value).x);
-                ImGui::TextDisabled("%s", value);
-                ImGui::SetCursorPosY(ImGui::GetCursorPosY() - em(.25f));
-                meter(f, colors[k++ % 4]);
+                std::snprintf(value, sizeof value, "%s · %.0f %%", format_bytes(bytes).c_str(), 100.0 * f);
+                slices.push_back({type, value, static_cast<double>(bytes), colors[k++ % 5]});
+            }
+            waffle("##layout", slices, 100, 25, 0, em(1.1f));
+            for (const auto& slice : slices) {
+                const ImVec2 p = ImGui::GetCursorScreenPos();
+                const float line = ImGui::GetTextLineHeight();
+                const float sq = em(.62f);
+                ImGui::GetWindowDrawList()->AddRectFilled({p.x, p.y + (line - sq) * .5f},
+                                                          {p.x + sq, p.y + (line + sq) * .5f},
+                                                          ImGui::GetColorU32(slice.color), em(.12f));
+                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + sq + em(.6f));
+                push_font(fonts().mono, .9f);
+                ImGui::TextUnformatted(slice.label.c_str());
+                ImGui::SameLine(ImGui::GetContentRegionMax().x - ImGui::CalcTextSize(slice.value.c_str()).x);
+                ImGui::TextDisabled("%s", slice.value.c_str());
+                ImGui::PopFont();
             }
         }
         if (edit_path_ != path_utf8(m->path)) {

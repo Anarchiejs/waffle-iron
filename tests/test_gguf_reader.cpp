@@ -1,6 +1,8 @@
 #include "core/gguf_reader.hpp"
+#include "core/util.hpp"
 #include "test_helpers.hpp"
 #include <gguf.h>
+#include <atomic>
 #include <cstdlib>
 #include <fstream>
 #include <memory>
@@ -157,7 +159,9 @@ TEST_CASE("GGUF: errors and filtered recursive scan", "[gguf_reader]") {
     } catch (const waffle::Error& e) {
         CHECK(std::string(e.what()).find(invalid.string()) != std::string::npos);
     }
-    const auto paths = waffle::scan_model_dirs({temp.path, temp.path, temp.path / "absent"});
+    const auto scanned = waffle::scan_model_dirs({temp.path, temp.path, temp.path / "absent"});
+    CHECK_FALSE(scanned.truncated);
+    const auto& paths = scanned.files;
     REQUIRE(paths.size() == 3);
     CHECK(paths[0].filename() == "blob");
     CHECK(paths[1].filename() == "model-00001-of-00002.gguf");
@@ -191,7 +195,9 @@ TEST_CASE("GGUF: Ollama blobs named from manifests, drafts hidden", "[gguf_reade
     CHECK_FALSE(draft->model);
     CHECK_FALSE(waffle::find_ollama_blob(blobs / "sha256-ccc3").has_value()); // orphan: left as-is
 
-    const auto paths = waffle::scan_model_dirs({blobs});
+    const auto scanned = waffle::scan_model_dirs({blobs});
+    CHECK_FALSE(scanned.truncated);
+    const auto& paths = scanned.files;
     REQUIRE(paths.size() == 2);
     CHECK(paths[0].filename() == "sha256-aaa1");
     CHECK(paths[1].filename() == "sha256-ccc3");
@@ -297,4 +303,97 @@ TEST_CASE("GGUF: optional real model", "[gguf_reader]") {
     for (const auto& [type, size] : model.bytes_by_type) bytes += size;
     CHECK(bytes > 0);
     CHECK(bytes <= model.file_size);
+}
+
+TEST_CASE("GGUF: block_count above the cap is rejected before the layer array", "[gguf_reader]") {
+    waffle::test::TempDir temp("huge_layers");
+    const auto path = temp.path / "huge.gguf";
+    std::unique_ptr<ggml_context, decltype(&ggml_free)> tensors(ggml_init({1024 * 1024, nullptr, false}), ggml_free);
+    std::unique_ptr<gguf_context, decltype(&gguf_free)> ctx(gguf_init_empty(), gguf_free);
+    REQUIRE(tensors);
+    REQUIRE(ctx);
+    gguf_set_val_str(ctx.get(), "general.architecture", "llama");
+    gguf_set_val_str(ctx.get(), "general.name", "Huge");
+    gguf_set_val_u32(ctx.get(), "llama.block_count", waffle::max_model_layers + 1);
+    gguf_set_val_u32(ctx.get(), "llama.attention.sliding_window", 16);
+    auto* tensor = ggml_new_tensor_1d(tensors.get(), GGML_TYPE_F32, 4);
+    ggml_set_name(tensor, "token_embd.weight");
+    ggml_set_zero(tensor);
+    gguf_add_tensor(ctx.get(), tensor);
+    REQUIRE(gguf_write_to_file(ctx.get(), path.string().c_str(), false));
+    CHECK_THROWS_AS(waffle::read_gguf(path, false), waffle::Error);
+
+    const auto small = temp.path / "swa.gguf";
+    gguf_set_val_u32(ctx.get(), "llama.block_count", 2);
+    REQUIRE(gguf_write_to_file(ctx.get(), small.string().c_str(), false));
+    const auto model = waffle::read_gguf(small, false);
+    CHECK(model.n_layer == 2);
+    CHECK(model.swa_layers == std::vector<uint8_t>{1, 1});
+}
+
+TEST_CASE("GGUF: scan honors depth, entry cap, and cancel", "[gguf_reader]") {
+    waffle::test::TempDir temp("scan_limits");
+    std::filesystem::create_directories(temp.path / "a" / "b");
+    waffle::test::write_l1_model(temp.path / "top.gguf");
+    waffle::test::write_l1_model(temp.path / "a" / "b" / "deep.gguf");
+
+    waffle::ScanLimits shallow;
+    shallow.max_depth = 0;
+    const auto top_only = waffle::scan_model_dirs({temp.path}, nullptr, shallow);
+    CHECK(top_only.truncated);
+    REQUIRE(top_only.files.size() == 1);
+    CHECK(top_only.files[0].filename() == "top.gguf");
+
+    waffle::ScanLimits few;
+    few.max_entries = 0;
+    const auto stopped = waffle::scan_model_dirs({temp.path}, nullptr, few);
+    CHECK(stopped.truncated);
+    CHECK(stopped.files.empty());
+
+    std::atomic<bool> cancel{true};
+    const auto none = waffle::scan_model_dirs({temp.path}, &cancel);
+    CHECK(none.files.empty());
+    CHECK_FALSE(none.truncated);
+}
+
+TEST_CASE("GGUF: a manifest larger than the read cap is not loaded whole", "[gguf_reader]") {
+    waffle::test::TempDir temp("manifest_cap");
+    const auto blobs = temp.path / "blobs";
+    const auto manifest_dir = temp.path / "manifests" / "registry.ollama.ai" / "library" / "gemma4";
+    std::filesystem::create_directories(blobs);
+    std::filesystem::create_directories(manifest_dir);
+    waffle::test::write_l1_model(blobs / "sha256-aaa1");
+    waffle::test::write_l1_model(blobs / "sha256-bbb2");
+    {
+        std::ofstream file(manifest_dir / "e4b", std::ios::binary);
+        file << R"({"layers":[{"mediaType":"application/vnd.ollama.image.model","digest":"sha256:aaa1","size":1}]})";
+        file << std::string(300 * 1024, ' ');
+        file << R"({"mediaType":"application/vnd.ollama.image.model","digest":"sha256:bbb2","size":1})";
+    }
+    const auto first = waffle::find_ollama_blob(blobs / "sha256-aaa1");
+    REQUIRE(first.has_value());
+    CHECK(first->model);
+    CHECK_FALSE(waffle::find_ollama_blob(blobs / "sha256-bbb2").has_value());
+}
+
+TEST_CASE("paths: tilde and environment variables expand", "[util]") {
+    const auto plain = waffle::expand_user_path("/tmp/plain");
+    CHECK(plain == std::filesystem::path("/tmp/plain"));
+#ifndef _WIN32
+    waffle::test::TempDir home("expand_home");
+    EnvOverride home_env("HOME", home.path.string());
+    CHECK(waffle::expand_user_path("~/models") == home.path / "models");
+    CHECK(waffle::expand_user_path("~") == home.path);
+    CHECK(waffle::expand_user_path("  ~/models  ") == home.path / "models");
+    EnvOverride models("WAFFLE_MODELS_TEST", (home.path / "opt").string());
+    CHECK(waffle::expand_user_path("$WAFFLE_MODELS_TEST/sub") == home.path / "opt" / "sub");
+    CHECK(waffle::expand_user_path("${WAFFLE_MODELS_TEST}/sub") == home.path / "opt" / "sub");
+    CHECK(waffle::expand_user_path("/tmp/$WAFFLE_NOT_A_REAL_VAR").string().find("WAFFLE_NOT_A_REAL_VAR") !=
+          std::string::npos);
+#else
+    waffle::test::TempDir home("expand_home");
+    EnvOverride profile("USERPROFILE", home.path.string());
+    CHECK(waffle::expand_user_path("%USERPROFILE%\\models") == home.path / "models");
+    CHECK(waffle::expand_user_path("~\\models") == home.path / "models");
+#endif
 }

@@ -3,9 +3,9 @@
 
 #include "core/types.hpp"
 
+#include <cstddef>
 #include <filesystem>
 #include <span>
-#include <string_view>
 #include <string_view>
 #include <stop_token>
 #include <string>
@@ -43,6 +43,18 @@ struct CampaignGrid {
     // Extra model files. Empty keeps base.load.model_path.
     std::vector<std::filesystem::path> models;
 };
+// Same cap the bench page enforces. expand_grid and the CLI refuse a larger product
+// before the configuration list is allocated.
+inline constexpr std::size_t max_campaign_configurations = 10000;
+
+// Throws Error("Limit: 10,000 configurations per campaign") when count * factor would pass the cap.
+// factor 0 leaves count unchanged (an empty grid axis keeps the base configuration).
+std::size_t within_campaign_limit(std::size_t count, std::size_t factor);
+
+// Product of the non-empty axes. One configuration when every axis is empty.
+// Throws the campaign-limit error before any list is allocated.
+std::size_t campaign_configuration_count(const CampaignGrid& grid);
+
 std::vector<BenchConfig> expand_grid(const CampaignGrid& grid);
 
 // Full campaign; one BenchResult per configuration (a configuration that fails — insufficient

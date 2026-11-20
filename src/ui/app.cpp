@@ -379,9 +379,9 @@ void App::frame() {
     if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_R, ImGuiInputFlags_RouteGlobal) && views_[0])
         request_library_scan(*views_[0]);
     // Development screenshots: WAFFLE_SELECT=<index> preselects a library model.
-    if (static const char* select = std::getenv("WAFFLE_SELECT"); select && ctx_.selected_model < 0) {
+    if (static const char* select = std::getenv("WAFFLE_SELECT"); select && ctx_.selected_path.empty()) {
         const int index = std::atoi(select);
-        if (index >= 0 && index < static_cast<int>(ctx_.library.size())) ctx_.selected_model = index;
+        if (index >= 0 && index < static_cast<int>(ctx_.library.size())) ctx_.set_selected_index(index);
     }
     if (ctx_.requested_page >= 0) {
         page_ = std::clamp(ctx_.requested_page, 0, static_cast<int>(views_.size()) - 1);

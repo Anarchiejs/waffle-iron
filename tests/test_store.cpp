@@ -3,7 +3,12 @@
 #include "test_helpers.hpp"
 
 #include <cmath>
+#include <cstdlib>
 #include <fstream>
+
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 
 namespace {
 
@@ -118,6 +123,111 @@ TEST_CASE("store: models, tags, notes, and missing files", "[store]") {
     }
 
     REQUIRE_THROWS_AS(waffle::Store(dir.path), waffle::Error);
+}
+
+namespace {
+struct EnvClear {
+    std::string name;
+    bool had = false;
+    std::string previous;
+    explicit EnvClear(const char* name) : name(name) {
+        if (const char* old = std::getenv(name)) {
+            had = true;
+            previous = old;
+        }
+#ifdef _WIN32
+        _putenv_s(name, "");
+#else
+        unsetenv(name);
+#endif
+    }
+    ~EnvClear() {
+#ifdef _WIN32
+        _putenv_s(name.c_str(), had ? previous.c_str() : "");
+#else
+        if (had)
+            setenv(name.c_str(), previous.c_str(), 1);
+        else
+            unsetenv(name.c_str());
+#endif
+    }
+    EnvClear(const EnvClear&) = delete;
+    EnvClear& operator=(const EnvClear&) = delete;
+};
+} // namespace
+
+TEST_CASE("store: a missing volume keeps tags and notes", "[store]") {
+    waffle::test::TempDir dir("l3_store_volume");
+    waffle::Store store(dir.path / "waffle.db");
+    const auto volume = dir.path / "volume";
+    const auto model_path = volume / "tiny.gguf";
+    std::filesystem::create_directories(volume);
+    touch(model_path);
+    store.upsert_model(sample_model(model_path));
+    store.set_model_tags(path_key(model_path), {"keep"});
+    store.set_model_notes(path_key(model_path), "still here");
+
+    std::filesystem::remove_all(volume);
+    CHECK_FALSE(waffle::model_file_is_gone(model_path));
+    store.remove_missing_models();
+    const auto kept = store.find_model(path_key(model_path));
+    REQUIRE(kept.has_value());
+    CHECK(kept->notes == "still here");
+    CHECK(kept->tags == std::vector<std::string>{"keep"});
+
+    std::filesystem::create_directories(volume);
+    touch(model_path);
+    std::filesystem::remove(model_path);
+    CHECK(waffle::model_file_is_gone(model_path));
+    store.remove_missing_models();
+    CHECK_FALSE(store.find_model(path_key(model_path)).has_value());
+}
+
+TEST_CASE("store: database is owner-only and refuses a link", "[store]") {
+    waffle::test::TempDir dir("l3_store_private");
+    const auto db = dir.path / "nested" / "waffle.db";
+    {
+        waffle::Store store(db);
+        store.upsert_model(sample_model(dir.path / "m.gguf"));
+    }
+#ifndef _WIN32
+    using perms = std::filesystem::perms;
+    const auto directory = std::filesystem::status(db.parent_path()).permissions();
+    const auto file = std::filesystem::status(db).permissions();
+    CHECK((directory & perms::group_all) == perms::none);
+    CHECK((directory & perms::others_all) == perms::none);
+    CHECK((directory & perms::owner_all) == perms::owner_all);
+    CHECK((file & perms::group_all) == perms::none);
+    CHECK((file & perms::others_all) == perms::none);
+    CHECK((file & perms::owner_read) == perms::owner_read);
+    CHECK((file & perms::owner_write) == perms::owner_write);
+#endif
+    std::error_code ec;
+    const auto real = dir.path / "real";
+    std::filesystem::create_directory(real);
+    const auto link = dir.path / "linked";
+    std::filesystem::create_directory_symlink(real, link, ec);
+    if (!ec) CHECK_THROWS_AS(waffle::Store(link / "waffle.db"), waffle::Error);
+    const auto target = dir.path / "db-target";
+    {
+        std::ofstream file(target, std::ios::binary);
+        file << "x";
+    }
+    const auto file_link = dir.path / "db-link";
+    ec.clear();
+    std::filesystem::create_symlink(target, file_link, ec);
+    if (!ec) CHECK_THROWS_AS(waffle::Store(file_link), waffle::Error);
+}
+
+TEST_CASE("store: no home directory does not use the temp directory", "[store]") {
+#ifdef _WIN32
+    EnvClear local("LOCALAPPDATA");
+    EnvClear profile("USERPROFILE");
+#else
+    EnvClear xdg("XDG_DATA_HOME");
+    EnvClear home("HOME");
+#endif
+    CHECK_THROWS_AS(waffle::Store::default_path(), waffle::Error);
 }
 
 TEST_CASE("store: campaigns, history, and VRAM checks", "[store]") {

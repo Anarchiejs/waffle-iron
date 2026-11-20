@@ -27,7 +27,7 @@ struct CompareProgress {
 };
 class CompareView final : public View {
     int models_[2] = {-1, -1};
-    int seen_selection_ = -1;
+    std::filesystem::path seen_selection_path_;
     LoadParams loads_[2];
     char prompt_[8192] = "Explain the water cycle in a few sentences.";
     char reference_[32768] = {};
@@ -268,9 +268,14 @@ public:
     const char* icon() const override { return icon_compare; }
     void draw(AppContext& ctx) override {
         engine_ = &ctx.engine;
-        if (ctx.selected_model != seen_selection_) {
-            seen_selection_ = ctx.selected_model;
-            if (!future_.valid() && models_[0] < 0 && ctx.selected_model >= 0) models_[0] = ctx.selected_model;
+        for (int i = 0; i < 2; ++i)
+            if (!loads_[i].model_path.empty()) models_[i] = index_of_model(ctx.library, loads_[i].model_path);
+        if (ctx.selected_path != seen_selection_path_) {
+            seen_selection_path_ = ctx.selected_path;
+            if (!future_.valid() && models_[0] < 0 && !ctx.selected_path.empty()) {
+                models_[0] = ctx.selected_model;
+                loads_[0].model_path = ctx.selected_path;
+            }
         }
         if (is_ready(future_)) {
             try {

@@ -59,6 +59,7 @@ Without the CUDA Toolkit the interface still builds: models run on the CPU. The 
 | vcpkg | yes | see the install steps below. Clone it without `--depth` |
 | OpenGL and GLFW's X11 headers | yes, for the interface | see the package line below |
 | Autotools | yes, for the interface | vcpkg builds some X11 dependencies from source |
+| zenity or kdialog | no | **Browse** in the library. Without either, the button says so and the path can be typed |
 | NVIDIA driver | only for NVML and a CUDA build | the monitor loads `libnvidia-ml.so.1` from the driver |
 | CUDA Toolkit (`nvcc`) | no | https://developer.nvidia.com/cuda-downloads |
 
@@ -99,6 +100,12 @@ The interface needs an X11 display or XWayland. A Wayland-only session without X
 | CUDA Toolkit | no | not used. Apple GPUs go through Metal |
 
 A CPU build (`--cpu`, preset `cpu-release`) does not need the Metal compiler. The default `./install.sh` selects Metal when `xcrun metal` is available.
+
+## Prebuilt packages
+
+A tag named `v*` publishes CPU builds for Windows x64, Linux x64, and macOS on the [releases page](https://github.com/Anarchiejs/waffle-iron/releases). Each platform's assets are the `cpu-release` preset with `-DGGML_NATIVE=OFF`: `waffle` and `WaffleIron` (`.exe` on Windows), the `assets` folder, `LICENSE`, `NOTICE`, and `THIRD_PARTY.md`. Those builds run and measure models on the CPU. They do not include CUDA or Metal. On Windows and Linux the monitor still reads an NVIDIA GPU through NVML when the driver is installed.
+
+CUDA and Metal need a build from source. The installer below detects the GPU and writes a local preset. The first configure downloads the vcpkg ports, and a CUDA or Metal build of llama.cpp takes a long time.
 
 ## Quick install
 
@@ -171,7 +178,7 @@ Linux and macOS variants (the Windows names, such as `-Cpu`, are also accepted):
 
 The library database (see [Where the data lives](#where-the-data-lives)) is created on first start. If it is empty, the library stays empty for a few moments: a scan runs in the background, without blocking the window, then the models it found appear. A toast says "Scan finished".
 
-That scan runs again on every launch, even when the Library page is not the one on screen. There is no need to run `waffle scan` by hand for the first fill. **Rescan**, or Ctrl+R, starts it again after you add files.
+That scan runs again on every launch, even when the Library page is not the one on screen. There is no need to run `waffle scan` by hand for the first fill. **Rescan**, or Ctrl+R, starts it again after you add files. **Cancel** stops a scan that is running. Closing the window does not wait for the rest of the walk.
 
 The sidebar lists the six pages in three groups: **Understand** (Library, VRAM planner), **Measure** (Bench, Monitor), and **Tune** (Sampler lab, Comparator). Ctrl+1 through Ctrl+6 switch pages in that order. The status bar shows the work in progress, the GPU name, and VRAM when NVML answers.
 
@@ -196,7 +203,7 @@ On Windows those profile paths are `%USERPROFILE%\models`, `%USERPROFILE%\.ollam
 
 Example: copy `gemma-4-E4B-Q4_K_M.gguf` into the profile `models` folder, then open Waffle Iron (or click **Rescan**). The model shows up with its name, architecture, quantization, size, parameter count, and context.
 
-The Library ignores files that are not GGUF, vision projectors (`mmproj`, architecture `clip`), and split model parts other than the first (`…-00002-of-…`). Another folder is added with **Add a folder** (UTF-8 path). The record of a selected model accepts comma-separated tags and notes, stored in the database.
+The Library ignores files that are not GGUF, vision projectors (`mmproj`, architecture `clip`), and split model parts other than the first (`…-00002-of-…`). Another folder is added with **Add a folder**. The field accepts a full path, `~/models`, or `%USERPROFILE%\models`, and expands `~` and environment variables. **Browse** opens the system folder dialog; on Linux that is zenity or kdialog. The record of a selected model accepts comma-separated tags and notes, stored in the database.
 
 If none of the folders in the list exist, the page shows them as "absent": create the profile `models` folder and put the files there.
 
@@ -264,7 +271,7 @@ waffle gpu                     GPU state (NVML)
 
 `waffle plan --verify` actually loads the model, measures the VRAM it took, and prints the gap against the estimate, plus the allocations llama.cpp reported. That gap is for the GPU in the machine, not a portable specification.
 
-`waffle bench` accepts comma-separated lists for `--ngl`, `--ctx`, `--ctk`, `--fa`, `--ubatch`, `--pp`, `--tg`, and `--reps`. `--ctv` sets the V cache when `--ctk` is omitted. `--swa-full`, `--threads`, `--warmup`, and `--seed` set one value. Extra model paths are measured with the same grid. The campaign is saved and the Markdown table is printed. `waffle export <id> --csv`, `--md`, or `--json` writes a campaign back out, and `waffle import file.json` reads a JSON campaign. `waffle --version` prints the waffle and llama.cpp versions. `waffle ppl MODEL --file text.txt` prints perplexity. `waffle gpu` exits non-zero when telemetry is unavailable.
+`waffle bench` accepts comma-separated lists for `--ngl`, `--ctx`, `--ctk`, `--fa`, `--ubatch`, `--pp`, `--tg`, and `--reps`. The product of those lists, including `--pp`, `--tg`, and `--reps`, is capped at 10,000 configurations, the same limit as the bench page. `--ctv` sets the V cache when `--ctk` is omitted. `--swa-full`, `--threads`, `--warmup`, and `--seed` set one value. Extra model paths are measured with the same grid. The campaign is saved and the Markdown table is printed. `waffle export <id> --csv`, `--md`, or `--json` writes a campaign back out, and `waffle import file.json` reads a JSON campaign. `waffle --version` prints the waffle and llama.cpp versions. `waffle ppl MODEL --file text.txt` prints perplexity. `waffle gpu` exits non-zero when telemetry is unavailable.
 
 ## Advanced build
 
@@ -331,7 +338,7 @@ On Windows, run those three commands through `scripts\dev.cmd` instead of `scrip
 
 | What | Windows | Linux | macOS |
 |---|---|---|---|
-| Library, campaigns, VRAM checks | `%LOCALAPPDATA%\WaffleIron\waffle.db` | `$XDG_DATA_HOME/WaffleIron/waffle.db`, or `~/.local/share/WaffleIron/waffle.db` | `~/Library/Application Support/WaffleIron/waffle.db` |
+| Library, campaigns, VRAM checks | `%LOCALAPPDATA%\WaffleIron\waffle.db` (or `%USERPROFILE%\AppData\Local\WaffleIron\waffle.db`) | `$XDG_DATA_HOME/WaffleIron/waffle.db`, or `~/.local/share/WaffleIron/waffle.db` | `~/Library/Application Support/WaffleIron/waffle.db` |
 | Interface state | `imgui.ini` next to the executable | same | same |
 | Icon font and optional Inter | `assets/fonts/` next to the executable (copied at build time; `lucide.ttf` is included) | same | same |
 | Binaries | `build\cpu-release\`, `build\cuda-release\`, or `build\cuda-release-local\` | `build/cpu-release/`, `build/cuda-release/`, or `build/cuda-release-local/` | `build/cpu-release/` or `build/metal-release/` |
@@ -340,7 +347,7 @@ On Windows, run those three commands through `scripts\dev.cmd` instead of `scrip
 | Install log | `build\install.log` | `build/install.log` | `build/install.log` |
 | Campaign exports | the path you choose, by default `Documents\WaffleIron` | `XDG_DOCUMENTS_DIR/WaffleIron` when `~/.config/user-dirs.dirs` or `XDG_DOCUMENTS_DIR` says so, otherwise `~/Documents/WaffleIron` | `~/Documents/WaffleIron` |
 
-Deleting `waffle.db` starts from an empty library; the next scan rebuilds it. The GGUF files are not in that database, only their records.
+The database file and its directory are readable and writable only by the owner. If no home directory is set, Waffle Iron stops instead of creating the database in the temporary directory. A path that is already a link is refused. Deleting `waffle.db` starts from an empty library; the next scan rebuilds it. The GGUF files are not in that database, only their records.
 
 ## Troubleshooting
 

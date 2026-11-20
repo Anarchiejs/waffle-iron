@@ -3,6 +3,9 @@
 
 #include "core/types.hpp"
 
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -14,8 +17,13 @@ namespace waffle {
 // True if the file starts with the "GGUF" signature (Ollama blobs have no extension).
 bool is_gguf_file(const std::filesystem::path& path);
 
+// Above this, block_count is rejected. A uint32 layer count otherwise allocates one byte per
+// layer (and walks that many entries) when the file sets a sliding window.
+inline constexpr uint32_t max_model_layers = 100000;
+
 // Reads the GGUF header. with_tensors=false skips the tensor list (faster for a scan)
-// but still fills n_params and bytes_by_type. Throws waffle::Error if the file is unreadable.
+// but still fills n_params and bytes_by_type. Throws waffle::Error if the file is unreadable
+// or block_count is above max_model_layers.
 ModelInfo read_gguf(const std::filesystem::path& path, bool with_tensors = true);
 
 // Known locations, even if they do not exist yet.
@@ -48,10 +56,25 @@ std::optional<OllamaBlob> find_ollama_blob(const std::filesystem::path& path);
 // Drops the manifest index so the next lookup rereads the manifests directory.
 void clear_ollama_cache();
 
+// Caps for scan_model_dirs. A walk that hits one of them sets ModelScan::truncated and stops.
+struct ScanLimits {
+    int max_depth = 32;               // directory depth from the root; the root's own entries are depth 0
+    std::size_t max_entries = 100000; // files and directories visited
+    std::size_t max_files = 20000;    // GGUF paths returned
+};
+
+struct ModelScan {
+    std::vector<std::filesystem::path> files;
+    bool truncated = false;
+};
+
 // Recursively walks directories and returns GGUF files (signature checked),
 // sorted by path. Skips unreadable files, "-<index>-of-<count>" shards whose index is not 1,
 // and Ollama blobs that are not a main model (draft models, projectors).
-std::vector<std::filesystem::path> scan_model_dirs(const std::vector<std::filesystem::path>& roots);
+// Stops when `cancel` is non-null and becomes true, or when a ScanLimits cap is hit.
+// cancel is read between entries and is not waited on inside a blocking open.
+ModelScan scan_model_dirs(const std::vector<std::filesystem::path>& roots, const std::atomic<bool>* cancel = nullptr,
+                          ScanLimits limits = {});
 
 // False for GGUF files that are not language models loadable on their own:
 // vision projectors (architecture "clip", Ollama mmproj blobs), files with no layers.

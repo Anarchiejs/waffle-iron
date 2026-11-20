@@ -1,5 +1,5 @@
-// Native folder picker and drag-and-drop paths. The picker returns nullopt when the
-// platform has no dialog or the user cancels; the text field stays available.
+// Native folder picker and drag-and-drop paths. Cancelled leaves the text field as it is.
+// Unavailable means this machine has no folder dialog (on Linux, neither zenity nor kdialog).
 #pragma once
 
 #include <filesystem>
@@ -9,7 +9,14 @@
 
 namespace waffle::ui {
 
-std::optional<std::filesystem::path> pick_folder(const std::string& title);
+enum class FolderPickStatus { Picked, Cancelled, Unavailable };
+
+struct FolderPick {
+    FolderPickStatus status = FolderPickStatus::Cancelled;
+    std::optional<std::filesystem::path> path;
+};
+
+FolderPick pick_folder(const std::string& title);
 
 void push_dropped_paths(std::vector<std::filesystem::path> paths);
 std::vector<std::filesystem::path> take_dropped_paths();

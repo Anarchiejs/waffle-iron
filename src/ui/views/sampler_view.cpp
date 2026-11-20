@@ -41,7 +41,9 @@ ImU32 probability_color(float p) {
     return ImGui::ColorConvertFloat4ToU32(probability_color4(p));
 }
 class SamplerView final : public View {
-    int model_ = -1, generate_n_ = 32, remaining_ = 0, seen_selection_ = -1;
+    int model_ = -1, generate_n_ = 32, remaining_ = 0;
+    std::filesystem::path model_path_;
+    std::filesystem::path seen_selection_path_;
     LoadParams load_;
     LoadParams active_load_;
     SamplerSettings settings_;
@@ -100,7 +102,11 @@ class SamplerView final : public View {
         card_title("Prompt", "The model is loaded when you start, then each step shows the candidates.");
         ImGui::BeginDisabled(busy());
         field_label("Model");
-        model_combo("##model", ctx, model_);
+        if (model_combo("##model", ctx, model_)) {
+            model_path_.clear();
+            if (model_ >= 0 && model_ < static_cast<int>(ctx.library.size()))
+                model_path_ = ctx.library[static_cast<size_t>(model_)].path;
+        }
         field_label("Starting text");
         ImGui::InputTextMultiline("##prompt", prompt_, sizeof(prompt_), ImVec2(-FLT_MIN, em(5.5f)));
         checkbox("Chat template", &chat_);
@@ -140,7 +146,8 @@ class SamplerView final : public View {
         field_pair(
             [&](float w) {
                 field_label("Top-p", "1 = off", w);
-                changed |= ImGui::SliderFloat("##topp", &settings_.top_p, 0, 1, "%.2f");
+                if (!(settings_.top_p > 0.f)) settings_.top_p = 0.01f;
+                changed |= ImGui::SliderFloat("##topp", &settings_.top_p, 0.01f, 1, "%.2f");
             },
             [&](float w) {
                 field_label("Min-p", "0 = off", w);
@@ -330,10 +337,14 @@ public:
     }
     const char* icon() const override { return icon_sampler; }
     void draw(AppContext& ctx) override {
-        // Follows the model selected in the library.
-        if (ctx.selected_model != seen_selection_) {
-            seen_selection_ = ctx.selected_model;
-            if (!busy() && ctx.selected_model >= 0) model_ = ctx.selected_model;
+        // Follows the model selected in the library, by path so a scan cannot shift it.
+        if (!model_path_.empty()) model_ = index_of_model(ctx.library, model_path_);
+        if (ctx.selected_path != seen_selection_path_) {
+            seen_selection_path_ = ctx.selected_path;
+            if (!busy() && !ctx.selected_path.empty()) {
+                model_ = ctx.selected_model;
+                model_path_ = ctx.selected_path;
+            }
         }
         if (is_ready(future_)) {
             try {

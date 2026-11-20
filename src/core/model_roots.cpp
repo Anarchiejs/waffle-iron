@@ -7,7 +7,6 @@
 #include <fstream>
 #include <mutex>
 #include <regex>
-#include <sstream>
 #include <system_error>
 #include <unordered_map>
 
@@ -48,6 +47,17 @@ std::string ollama_tag(const std::filesystem::path& relative) {
     return tag;
 }
 
+std::string read_text_limited(const std::filesystem::path& path, std::size_t cap = 256 * 1024) {
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(path, ec)) return {};
+    std::ifstream in(path, std::ios::binary);
+    if (!in) return {};
+    std::string text(cap, '\0');
+    in.read(text.data(), static_cast<std::streamsize>(cap));
+    text.resize(static_cast<std::size_t>(in.gcount()));
+    return text;
+}
+
 std::filesystem::path profile_directory() {
 #ifdef _WIN32
     if (const auto* home = std::getenv("USERPROFILE"); home && *home) return {home};
@@ -81,17 +91,25 @@ OllamaIndex index_manifests(const std::filesystem::path& manifests) {
     static const std::regex layer(R"(\{[^{}]*\})");
     static const std::regex media(R"re("mediaType"\s*:\s*"([^"]*)")re");
     static const std::regex sha(R"re("digest"\s*:\s*"sha256:([0-9a-fA-F]+)")re");
+    // Manifests are small JSON. Cap the read the same way as systemd units, and stop a huge tree.
+    constexpr int max_depth = 8;
+    constexpr std::size_t max_files = 10000;
     OllamaIndex index;
     std::error_code ec;
     std::filesystem::recursive_directory_iterator it(manifests,
                                                      std::filesystem::directory_options::skip_permission_denied, ec),
         end;
+    std::size_t seen = 0;
     for (; it != end; it.increment(ec)) {
-        if (ec || !it->is_regular_file(ec)) continue;
-        std::ifstream in(it->path(), std::ios::binary);
-        std::stringstream text;
-        text << in.rdbuf();
-        const auto json = text.str();
+        if (ec) {
+            ec.clear();
+            continue;
+        }
+        if (it.depth() >= max_depth) it.disable_recursion_pending();
+        if (!it->is_regular_file(ec) || ec) continue;
+        if (++seen > max_files) break;
+        const auto json = read_text_limited(it->path());
+        if (json.empty()) continue;
         const auto tag = ollama_tag(std::filesystem::relative(it->path(), manifests, ec));
         for (std::sregex_iterator l(json.begin(), json.end(), layer), last; l != last; ++l) {
             const auto object = l->str();
@@ -129,17 +147,6 @@ std::optional<OllamaBlob> find_ollama_blob(const std::filesystem::path& path) {
 }
 
 namespace {
-
-std::string read_text_limited(const std::filesystem::path& path, std::size_t cap = 256 * 1024) {
-    std::error_code ec;
-    if (!std::filesystem::is_regular_file(path, ec)) return {};
-    std::ifstream in(path, std::ios::binary);
-    if (!in) return {};
-    std::string text(cap, '\0');
-    in.read(text.data(), static_cast<std::streamsize>(cap));
-    text.resize(static_cast<std::size_t>(in.gcount()));
-    return text;
-}
 
 #if !defined(_WIN32) && !defined(__APPLE__)
 std::optional<std::filesystem::path> ollama_service_home() {

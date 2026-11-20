@@ -11,6 +11,15 @@ namespace waffle {
 std::string utf8_from_path(const std::filesystem::path& path);
 std::filesystem::path path_from_utf8(std::string_view utf8);
 
+// User-typed folder. Expands a leading ~ to the home directory, $VAR and ${VAR} on Unix,
+// and %VAR% (and a leading ~) on Windows. Unknown variables are left unchanged.
+std::filesystem::path expand_user_path(std::string_view text);
+
+// True only when the path is confirmed not to be a regular file and every existing
+// ancestor is present. A stat error, or a missing parent (unplugged volume, cut share,
+// unreadable directory), returns false so a failed stat is not treated as deletion.
+bool model_file_is_gone(const std::filesystem::path& path);
+
 // Resolves the existing prefix and appends any missing tail. Used as the library key.
 std::filesystem::path canonical_path(const std::filesystem::path& path);
 std::string path_key(const std::filesystem::path& path);

@@ -33,9 +33,19 @@ std::string utc_now() {
     return now_iso();
 }
 std::string csv_cell(const std::string& value) {
-    if (value.find_first_of(",\"\r\n") == std::string::npos) return value;
+    // Spreadsheets treat a cell that starts with one of these as a formula.
+    std::string text = value;
+    bool formula = false;
+    if (!text.empty()) {
+        const char lead = text.front();
+        if (lead == '=' || lead == '+' || lead == '-' || lead == '@') {
+            text.insert(text.begin(), '\'');
+            formula = true;
+        }
+    }
+    if (!formula && text.find_first_of(",\"\r\n") == std::string::npos) return text;
     std::string out = "\"";
-    for (char c : value) {
+    for (char c : text) {
         if (c == '"') out += '"';
         out += c;
     }
@@ -198,7 +208,25 @@ BenchResult run_bench(Engine& engine, Telemetry* telemetry, const BenchConfig& c
     return result;
 }
 
+std::size_t within_campaign_limit(std::size_t count, std::size_t factor) {
+    if (factor == 0) return count;
+    if (count > max_campaign_configurations / factor) throw Error("Limit: 10,000 configurations per campaign");
+    return count * factor;
+}
+
+std::size_t campaign_configuration_count(const CampaignGrid& grid) {
+    std::size_t count = 1;
+    count = within_campaign_limit(count, grid.n_gpu_layers.size());
+    count = within_campaign_limit(count, grid.n_ctx.size());
+    count = within_campaign_limit(count, grid.kv_type.size());
+    count = within_campaign_limit(count, grid.flash_attn.size());
+    count = within_campaign_limit(count, grid.n_ubatch.size());
+    count = within_campaign_limit(count, grid.models.size());
+    return count;
+}
+
 std::vector<BenchConfig> expand_grid(const CampaignGrid& grid) {
+    (void)campaign_configuration_count(grid);
     std::vector<BenchConfig> result{grid.base};
     auto expand = [&](const auto& values, auto assign) {
         if (values.empty()) return;

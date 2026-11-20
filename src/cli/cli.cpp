@@ -359,10 +359,11 @@ int cmd_scan(waffle::Store& store, const std::vector<std::string>& args) {
         for (const auto& dir : positionals) roots.push_back(path_from_utf8(dir));
     }
     for (const auto& dir : positionals) store.add_library_root(path_from_utf8(dir));
-    const auto files = waffle::scan_model_dirs(roots);
+    const auto scanned = waffle::scan_model_dirs(roots);
+    if (scanned.truncated) std::cerr << "Scan stopped early: a folder was too deep or had too many files\n";
     int recorded = 0;
     int failed = 0;
-    for (const auto& file : files) {
+    for (const auto& file : scanned.files) {
         try {
             const auto path = normalize_path(file);
             auto info = waffle::read_gguf(path, false);
@@ -458,7 +459,7 @@ void print_estimate(const waffle::VramEstimate& estimate) {
 
 // Load the model with the plan settings and compare measured VRAM with the estimate.
 void verify_plan(waffle::Store& store, const std::filesystem::path& path, const waffle::VramPlanInput& input,
-                 const waffle::VramEstimate& estimate) {
+                 const waffle::VramEstimate& estimate, const waffle::ModelInfo& info) {
     waffle::Telemetry telemetry;
 #if !defined(__APPLE__)
     if (!telemetry.sample()) throw waffle::Error("Cannot verify: " + telemetry.error());
@@ -487,7 +488,6 @@ void verify_plan(waffle::Store& store, const std::filesystem::path& path, const 
         std::lock_guard lock(allocations_mutex);
         allocations.push_back(std::move(line));
     });
-    const waffle::ModelInfo info = waffle::read_gguf(path, false);
     const waffle::VramVerification result = waffle::verify_model_vram(engine, &telemetry, info, input, params);
     const bool measured_memory = result.note.empty() || result.note.starts_with("Metal reports");
     const uint64_t measured = result.measured_gpu;
@@ -593,7 +593,7 @@ int cmd_plan(waffle::Store& store, const std::vector<std::string>& args) {
         const int layers = waffle::max_gpu_layers_for(info, input, *budget);
         std::cout << "Max GPU layers  " << layers << '\n';
     }
-    if (verify) verify_plan(store, model.path, input, estimate);
+    if (verify) verify_plan(store, model.path, input, estimate, info);
     return 0;
 }
 
@@ -707,6 +707,12 @@ int cmd_bench(waffle::Store& store, const std::vector<std::string>& args) {
             repetitions.push_back(static_cast<int>(value));
         }
     }
+
+    auto total = waffle::campaign_configuration_count(grid);
+    total = waffle::within_campaign_limit(total, prompts.size());
+    total = waffle::within_campaign_limit(total, generated.size());
+    total = waffle::within_campaign_limit(total, repetitions.size());
+    (void)total;
 
     waffle::Engine engine;
     waffle::Telemetry telemetry;

@@ -8,11 +8,15 @@
 #include <imgui.h>
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cctype>
 #include <cstdio>
-#include <future>
+#include <exception>
+#include <memory>
+#include <mutex>
 #include <numeric>
 #include <sstream>
+#include <thread>
 
 namespace waffle::ui {
 namespace {
@@ -27,6 +31,16 @@ std::string lower(std::string s) {
 struct ScanResult {
     std::vector<ModelInfo> models;
     std::vector<std::string> errors;
+    bool truncated = false;
+    bool cancelled = false;
+};
+struct ScanState {
+    std::atomic<bool> cancel{false};
+    std::mutex mutex;
+    Store* store = nullptr;
+    ScanResult result;
+    std::exception_ptr error;
+    bool finished = false;
 };
 class LibraryView final : public View {
 public:
@@ -49,9 +63,8 @@ public:
                 m.context_length = r.context_length;
                 m.n_layer = r.n_layer;
                 // The database may still hold older records: a missing file, or an Ollama draft model.
-                std::error_code ec;
                 const auto blob = find_ollama_blob(m.path);
-                if (is_language_model(m) && std::filesystem::exists(m.path, ec) && (!blob || blob->model))
+                if (is_language_model(m) && !model_file_is_gone(m.path) && (!blob || blob->model))
                     ctx.library.push_back(std::move(m));
             }
             for (const auto& root : ctx.store.library_roots()) extra_roots_.push_back(root);
@@ -66,56 +79,28 @@ public:
             extra_roots_.push_back(dropped);
             rescan = true;
         }
-        if (is_ready(scan_)) {
-            try {
-                auto result = scan_.get();
-                ctx.library.erase(std::remove_if(ctx.library.begin(), ctx.library.end(),
-                                                 [](const ModelInfo& model) {
-                                                     std::error_code ec;
-                                                     return !std::filesystem::is_regular_file(model.path, ec);
-                                                 }),
-                                  ctx.library.end());
-                for (auto& m : result.models) {
-                    auto it = std::find_if(ctx.library.begin(), ctx.library.end(),
-                                           [&](const auto& old) { return old.path == m.path; });
-                    if (it != ctx.library.end())
-                        *it = std::move(m);
-                    else
-                        ctx.library.push_back(std::move(m));
-                }
-                const auto n = result.models.size();
-                if (n == 0)
-                    ctx.notify("Scan finished: no models");
-                else if (n == 1)
-                    ctx.notify("Scan finished: 1 model");
-                else
-                    ctx.notify("Scan finished: " + std::to_string(n) + " models");
-                for (const auto& error : result.errors) ctx.notify(error, true);
-            } catch (const std::exception& e) {
-                ctx.notify(e.what(), true);
-            }
+        take_scan(ctx);
+        if (rescan && !scan_running()) start_scan(ctx);
+    }
+    ~LibraryView() override {
+        // Drop the store pointer under the same mutex the worker uses, then leave.
+        // A scan blocked in one file open is not joined: process exit stops it, and
+        // it will not touch the store after this returns.
+        if (scan_state_) {
+            scan_state_->cancel.store(true, std::memory_order_relaxed);
+            std::lock_guard lock(scan_state_->mutex);
+            scan_state_->store = nullptr;
         }
-        if (rescan && !scan_.valid()) {
-            auto roots = default_model_roots();
-            roots.insert(roots.end(), extra_roots_.begin(), extra_roots_.end());
-            auto* store = &ctx.store;
-            scan_ = std::async(std::launch::async, [roots = std::move(roots), store] {
-                ScanResult result;
-                for (const auto& path : scan_model_dirs(roots)) {
-                    try {
-                        auto m = read_gguf(path, false);
-                        if (!is_language_model(m)) continue;
-                        store->upsert_model(m);
-                        result.models.push_back(std::move(m));
-                    } catch (const std::exception& e) {
-                        result.errors.push_back(path_utf8(path.filename()) + " : " + e.what());
-                    }
-                }
-                store->remove_missing_models();
-                return result;
-            });
-            rescan = false;
+        if (!scan_thread_.joinable()) return;
+        bool finished = false;
+        if (scan_state_) {
+            std::lock_guard lock(scan_state_->mutex);
+            finished = scan_state_->finished;
         }
+        if (finished)
+            scan_thread_.join();
+        else
+            scan_thread_.detach();
     }
     void draw(AppContext& ctx) override {
         toolbar(ctx);
@@ -162,10 +147,15 @@ private:
         ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), right));
         if (ImGui::Button("Add a folder", {add_w, 0})) ImGui::OpenPopup("Model folder");
         ImGui::SameLine();
-        ImGui::BeginDisabled(scan_.valid());
-        if (ImGui::Button(scan_.valid() ? "Scanning..." : "Rescan", {scan_w, 0})) rescan = true;
-        ImGui::EndDisabled();
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("Ctrl+R");
+        const bool scanning = scan_running();
+        if (ImGui::Button(scanning ? "Cancel" : "Rescan", {scan_w, 0})) {
+            if (scanning) {
+                if (scan_state_) scan_state_->cancel.store(true, std::memory_order_relaxed);
+            } else {
+                rescan = true;
+            }
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip(scanning ? "Stop the scan" : "Ctrl+R");
         ImGui::SetNextWindowSize({em(30), 0});
         if (ImGui::BeginPopup("Model folder")) {
             card_title("Add a model folder", "Full path of a folder that contains .gguf files.");
@@ -176,14 +166,24 @@ private:
             ImGui::InputTextWithHint("##Path", "~/models", folder_.data(), folder_.size());
 #endif
             if (ImGui::Button("Browse...")) {
-                if (auto picked = pick_folder("Add a model folder")) {
-                    const auto text = utf8_from_path(*picked);
+                const auto picked = pick_folder("Add a model folder");
+                if (picked.status == FolderPickStatus::Picked && picked.path) {
+                    const auto text = utf8_from_path(*picked.path);
                     std::snprintf(folder_.data(), folder_.size(), "%s", text.c_str());
+                } else if (picked.status == FolderPickStatus::Unavailable) {
+#ifdef _WIN32
+                    ctx.notify("The folder dialog could not be opened. Type the folder path instead.", true);
+#elif defined(__APPLE__)
+                    ctx.notify("The folder dialog could not be opened. Type the folder path instead.", true);
+#else
+                    ctx.notify("Browse needs zenity or kdialog. Type the folder path instead.", true);
+#endif
                 }
             }
             if (primary_button("Add and scan") && folder_[0]) {
-                auto p = path_from_utf8(folder_.data());
-                if (std::filesystem::is_directory(p)) {
+                auto p = expand_user_path(folder_.data());
+                std::error_code ec;
+                if (std::filesystem::is_directory(p, ec)) {
                     ctx.store.add_library_root(p);
                     extra_roots_.push_back(p);
                     rescan = true;
@@ -196,8 +196,9 @@ private:
         // Folders indexed besides the defaults, and the drop hint.
         push_font(nullptr, .84f);
         ImGui::PushStyleColor(ImGuiCol_Text, col::dim);
-        if (scan_.valid()) {
-            ImGui::TextUnformatted("Scanning the model folders...");
+        if (scan_running()) {
+            const bool cancelling = scan_state_ && scan_state_->cancel.load(std::memory_order_relaxed);
+            ImGui::TextUnformatted(cancelling ? "Cancelling the scan..." : "Scanning the model folders...");
         } else {
             ImGui::TextUnformatted("Drop a folder or a .gguf file on the window to add its folder.");
             for (const auto& root : extra_roots_) {
@@ -234,7 +235,7 @@ private:
     }
     void list(AppContext& ctx) {
         if (ctx.library.empty()) {
-            if (scan_.valid())
+            if (scan_running())
                 empty_state("Looking for models...", "Known folders are scanned in the background.");
             else
                 empty_library();
@@ -314,7 +315,7 @@ private:
                 if (ImGui::Selectable("##line", selected,
                                       ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowOverlap,
                                       {0, row_h - em(.6f)}))
-                    ctx.selected_model = static_cast<int>(i);
+                    ctx.set_selected_index(static_cast<int>(i));
                 if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
                     ctx.requested_page = page_vram;
                 if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
@@ -489,8 +490,104 @@ private:
             }
         }
     }
+    bool scan_running() const {
+        if (!scan_state_) return false;
+        std::lock_guard lock(scan_state_->mutex);
+        return !scan_state_->finished;
+    }
+    void take_scan(AppContext& ctx) {
+        if (!scan_state_) return;
+        ScanResult result;
+        std::exception_ptr error;
+        {
+            std::lock_guard lock(scan_state_->mutex);
+            if (!scan_state_->finished) return;
+            result = std::move(scan_state_->result);
+            error = std::move(scan_state_->error);
+        }
+        if (scan_thread_.joinable()) scan_thread_.join();
+        scan_state_.reset();
+        if (error) {
+            try {
+                std::rethrow_exception(error);
+            } catch (const std::exception& e) {
+                ctx.notify(e.what(), true);
+            }
+            return;
+        }
+        ctx.library.erase(std::remove_if(ctx.library.begin(), ctx.library.end(),
+                                         [](const ModelInfo& model) { return model_file_is_gone(model.path); }),
+                          ctx.library.end());
+        for (auto& m : result.models) {
+            auto it = std::find_if(ctx.library.begin(), ctx.library.end(),
+                                   [&](const auto& old) { return old.path == m.path; });
+            if (it != ctx.library.end())
+                *it = std::move(m);
+            else
+                ctx.library.push_back(std::move(m));
+        }
+        ctx.rebind_selected();
+        if (result.cancelled) {
+            ctx.notify("Scan cancelled");
+        } else {
+            const auto n = result.models.size();
+            if (n == 0)
+                ctx.notify("Scan finished: no models");
+            else if (n == 1)
+                ctx.notify("Scan finished: 1 model");
+            else
+                ctx.notify("Scan finished: " + std::to_string(n) + " models");
+        }
+        if (result.truncated) ctx.notify("Scan stopped early: a folder was too deep or had too many files", true);
+        for (const auto& message : result.errors) ctx.notify(message, true);
+    }
+    void start_scan(AppContext& ctx) {
+        if (scan_thread_.joinable()) scan_thread_.join();
+        auto roots = default_model_roots();
+        roots.insert(roots.end(), extra_roots_.begin(), extra_roots_.end());
+        scan_state_ = std::make_shared<ScanState>();
+        scan_state_->store = &ctx.store;
+        auto state = scan_state_;
+        scan_thread_ = std::thread([state, roots = std::move(roots)] {
+            ScanResult result;
+            try {
+                const auto scanned = scan_model_dirs(roots, &state->cancel);
+                result.truncated = scanned.truncated;
+                for (const auto& path : scanned.files) {
+                    if (state->cancel.load(std::memory_order_relaxed)) break;
+                    try {
+                        auto model = read_gguf(path, false);
+                        if (!is_language_model(model)) continue;
+                        {
+                            std::lock_guard lock(state->mutex);
+                            if (state->cancel.load(std::memory_order_relaxed) || !state->store) break;
+                            state->store->upsert_model(model);
+                        }
+                        result.models.push_back(std::move(model));
+                    } catch (const std::exception& e) {
+                        result.errors.push_back(path_utf8(path.filename()) + " : " + e.what());
+                    }
+                }
+                result.cancelled = state->cancel.load(std::memory_order_relaxed);
+                if (!result.cancelled) {
+                    std::lock_guard lock(state->mutex);
+                    if (state->store) state->store->remove_missing_models();
+                }
+            } catch (...) {
+                std::lock_guard lock(state->mutex);
+                state->error = std::current_exception();
+                state->finished = true;
+                return;
+            }
+            std::lock_guard lock(state->mutex);
+            state->result = std::move(result);
+            state->finished = true;
+        });
+        rescan = false;
+    }
     bool initialized_ = false;
-    std::future<ScanResult> scan_;
+    std::shared_ptr<ScanState> scan_state_;
+    std::thread scan_thread_;
     std::vector<std::filesystem::path> extra_roots_;
     std::array<char, 256> filter_{}, metadata_filter_{};
     std::array<char, 2048> folder_{}, tags_{};

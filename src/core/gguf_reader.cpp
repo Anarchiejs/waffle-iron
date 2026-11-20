@@ -115,6 +115,8 @@ ModelInfo read_gguf(const std::filesystem::path& path, bool with_tensors) {
         const auto dim = model.n_head ? model.n_embd / model.n_head : 0;
         model.head_dim_k = integer(ctx.get(), prefix + "attention.key_length", dim);
         model.head_dim_v = integer(ctx.get(), prefix + "attention.value_length", dim);
+        if (model.n_layer > max_model_layers)
+            throw Error("GGUF block_count is above " + std::to_string(max_model_layers) + ": " + shown);
         model.sliding_window = integer(ctx.get(), prefix + "attention.sliding_window");
         model.head_dim_k_swa = integer(ctx.get(), prefix + "attention.key_length_swa", model.head_dim_k);
         model.head_dim_v_swa = integer(ctx.get(), prefix + "attention.value_length_swa", model.head_dim_v);
@@ -204,29 +206,60 @@ bool is_later_shard(std::string_view name) {
     return false;
 }
 
-std::vector<std::filesystem::path> scan_model_dirs(const std::vector<std::filesystem::path>& roots) {
+ModelScan scan_model_dirs(const std::vector<std::filesystem::path>& roots, const std::atomic<bool>* cancel,
+                          ScanLimits limits) {
     clear_ollama_cache();
+    if (limits.max_depth < 0) limits.max_depth = 0;
+    ModelScan scan;
     std::set<std::filesystem::path> result;
+    std::size_t entries = 0;
     for (const auto& root : roots) {
+        if (cancel && cancel->load(std::memory_order_relaxed)) return scan;
         std::error_code ec;
         std::filesystem::recursive_directory_iterator it(
             root, std::filesystem::directory_options::skip_permission_denied, ec),
             end;
+        if (ec) continue;
         while (it != end) {
+            if (cancel && cancel->load(std::memory_order_relaxed)) return scan;
+            if (ec) {
+                ec.clear();
+                it.increment(ec);
+                continue;
+            }
+            if (++entries > limits.max_entries) {
+                scan.truncated = true;
+                scan.files.assign(result.begin(), result.end());
+                return scan;
+            }
+            std::error_code kind;
+            if (it->is_directory(kind) && !kind && it.depth() >= limits.max_depth) {
+                it.disable_recursion_pending();
+                scan.truncated = true;
+            }
             const auto path = it->path();
-            if (it->is_regular_file(ec)) {
+            if (it->is_regular_file(kind) && !kind) {
                 auto name = utf8_from_path(path.filename());
                 std::transform(name.begin(), name.end(), name.begin(),
                                [](unsigned char c) { return char(std::tolower(c)); });
-                if (!name.starts_with("mmproj") && !is_later_shard(name) && is_gguf_file(path)) {
+                if (!name.starts_with("mmproj") && !is_later_shard(name) &&
+                    !(cancel && cancel->load(std::memory_order_relaxed)) && is_gguf_file(path)) {
                     const auto blob = find_ollama_blob(path);
-                    if (!blob || blob->model) result.insert(path.lexically_normal());
+                    if (!blob || blob->model) {
+                        if (result.size() >= limits.max_files) {
+                            scan.truncated = true;
+                            scan.files.assign(result.begin(), result.end());
+                            return scan;
+                        }
+                        result.insert(path.lexically_normal());
+                    }
                 }
             }
             ec.clear();
             it.increment(ec);
         }
     }
-    return {result.begin(), result.end()};
+    scan.files.assign(result.begin(), result.end());
+    return scan;
 }
 } // namespace waffle

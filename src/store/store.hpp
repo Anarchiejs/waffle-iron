@@ -63,10 +63,11 @@ public:
     Store(const Store&) = delete;
     Store& operator=(const Store&) = delete;
 
-    // Library database (directory created if needed):
-    //   Windows: %LOCALAPPDATA%\WaffleIron\waffle.db
+    // Library database (directory created if needed, owner-only; no temporary-directory fallback):
+    //   Windows: %LOCALAPPDATA%\WaffleIron\waffle.db, or %USERPROFILE%\AppData\Local\WaffleIron\waffle.db
     //   macOS:   ~/Library/Application Support/WaffleIron/waffle.db
     //   Linux:   $XDG_DATA_HOME/WaffleIron/waffle.db, or ~/.local/share/WaffleIron/waffle.db
+    // Throws if the home directory is not set, or if the directory or waffle.db is a link.
     static std::filesystem::path default_path();
 
     // --- Library
@@ -75,7 +76,7 @@ public:
     std::optional<ModelRecord> find_model(const std::string& path) const;
     void set_model_tags(const std::string& path, const std::vector<std::string>& tags);
     void set_model_notes(const std::string& path, const std::string& notes);
-    void remove_missing_models(); // deletes records whose file no longer exists
+    void remove_missing_models(); // deletes records whose file is confirmed gone (not a failed stat)
     void add_library_root(const std::filesystem::path& root);
     std::vector<std::filesystem::path> library_roots() const;
 

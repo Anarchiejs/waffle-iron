@@ -92,12 +92,15 @@ SplitLabels split_labels(const std::vector<std::string>& labels) {
     return out;
 }
 class BenchView final : public View {
-    int model_ = -1, seen_selection_ = -1;
+    int model_ = -1;
+    std::filesystem::path model_path_;
+    std::filesystem::path seen_selection_path_;
     char gpu_[128] = "0,20,99", ctx_[128] = "4096", kv_[128] = "f16", fa_[128] = "1", ub_[128] = "512";
     char name_[256] = "Campaign", path_[2048] = {};
     int prompt_ = 512, gen_ = 128, reps_ = 5, warmup_ = 1;
     unsigned seed_ = 42;
     std::vector<int> also_;
+    std::vector<std::filesystem::path> also_paths_;
     Engine* engine_ = nullptr;
     std::future<CampaignOutput> future_;
     std::shared_ptr<CampaignProgress> progress_ = std::make_shared<CampaignProgress>();
@@ -106,6 +109,21 @@ class BenchView final : public View {
     std::vector<HistoryPoint> history_;
     bool refresh_ = true;
     int history_model_ = -2;
+    std::filesystem::path history_path_;
+    void rebind(AppContext& ctx) {
+        if (!model_path_.empty()) model_ = index_of_model(ctx.library, model_path_);
+        if (!history_path_.empty()) history_model_ = index_of_model(ctx.library, history_path_);
+        also_.clear();
+        std::vector<std::filesystem::path> kept;
+        kept.reserve(also_paths_.size());
+        for (const auto& path : also_paths_) {
+            const int index = index_of_model(ctx.library, path);
+            if (index < 0) continue;
+            also_.push_back(index);
+            kept.push_back(path);
+        }
+        also_paths_.swap(kept);
+    }
     CampaignGrid grid(AppContext& ctx) {
         CampaignGrid g;
         if (model_ < 0 || model_ >= static_cast<int>(ctx.library.size())) throw Error("Select a model");
@@ -128,11 +146,7 @@ class BenchView final : public View {
         for (const auto& v : g.kv_type) (void)ggml_type_from_name(v);
         for (const auto& v : split_values(fa_)) g.flash_attn.push_back(integer(v, -1, 1));
         for (const auto& v : split_values(ub_)) g.n_ubatch.push_back(static_cast<uint32_t>(integer(v, 1, 1000000)));
-        const size_t models = std::max<size_t>(1, g.models.size());
-        const size_t count = std::max<size_t>(1, g.n_gpu_layers.size()) * std::max<size_t>(1, g.n_ctx.size()) *
-                             std::max<size_t>(1, g.kv_type.size()) * std::max<size_t>(1, g.flash_attn.size()) *
-                             std::max<size_t>(1, g.n_ubatch.size()) * models;
-        if (count > 10000) throw Error("Limit: 10,000 configurations per campaign");
+        (void)campaign_configuration_count(g);
         return g;
     }
     void campaign(AppContext& ctx) {
@@ -140,10 +154,16 @@ class BenchView final : public View {
                                "is measured.");
         ImGui::BeginDisabled(future_.valid());
         field_label("Model");
-        model_combo("##model", ctx, model_);
-        if (ImGui::Button("Also measure the selected model") && model_ >= 0 &&
-            std::find(also_.begin(), also_.end(), model_) == also_.end())
+        if (model_combo("##model", ctx, model_)) {
+            model_path_.clear();
+            if (model_ >= 0 && model_ < static_cast<int>(ctx.library.size()))
+                model_path_ = ctx.library[static_cast<size_t>(model_)].path;
+        }
+        if (ImGui::Button("Also measure the selected model") && model_ >= 0 && !model_path_.empty() &&
+            std::find(also_paths_.begin(), also_paths_.end(), model_path_) == also_paths_.end()) {
+            also_paths_.push_back(model_path_);
             also_.push_back(model_);
+        }
         for (size_t i = 0; i < also_.size();) {
             const int index = also_[i];
             const bool known = index >= 0 && index < static_cast<int>(ctx.library.size());
@@ -171,9 +191,10 @@ class BenchView final : public View {
             const bool removed = ImGui::Button("Remove", {remove_w, 0});
             ImGui::SetCursorScreenPos({p.x, p.y + h + ImGui::GetStyle().ItemSpacing.y});
             ImGui::Dummy({0, 0});
-            if (removed)
+            if (removed) {
                 also_.erase(also_.begin() + static_cast<std::ptrdiff_t>(i));
-            else
+                if (i < also_paths_.size()) also_paths_.erase(also_paths_.begin() + static_cast<std::ptrdiff_t>(i));
+            } else
                 ++i;
             ImGui::PopID();
         }
@@ -441,6 +462,11 @@ class BenchView final : public View {
         bool changed =
             model_combo("##history", ctx, history_model_,
                         std::min(em(26), ImGui::GetContentRegionAvail().x - button - ImGui::GetStyle().ItemSpacing.x));
+        if (changed) {
+            history_path_.clear();
+            if (history_model_ >= 0 && history_model_ < static_cast<int>(ctx.library.size()))
+                history_path_ = ctx.library[static_cast<size_t>(history_model_)].path;
+        }
         ImGui::SameLine();
         if (ImGui::Button("Refresh")) refresh_ = true;
         if (refresh_ || changed) {
@@ -651,11 +677,16 @@ public:
     const char* icon() const override { return icon_bench; }
     void draw(AppContext& ctx) override {
         engine_ = &ctx.engine;
-        if (ctx.selected_model != seen_selection_) {
-            seen_selection_ = ctx.selected_model;
-            if (!future_.valid() && ctx.selected_model >= 0) model_ = ctx.selected_model;
-            if (history_model_ < 0 && ctx.selected_model >= 0) {
+        rebind(ctx);
+        if (ctx.selected_path != seen_selection_path_) {
+            seen_selection_path_ = ctx.selected_path;
+            if (!future_.valid() && !ctx.selected_path.empty()) {
+                model_ = ctx.selected_model;
+                model_path_ = ctx.selected_path;
+            }
+            if (history_path_.empty() && !ctx.selected_path.empty()) {
                 history_model_ = ctx.selected_model;
+                history_path_ = ctx.selected_path;
                 refresh_ = true;
             }
         }

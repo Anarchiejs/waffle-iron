@@ -43,10 +43,39 @@ struct AppContext {
     std::deque<Toast> toasts;
     void notify(std::string text, bool error = false); // defined in app.cpp
 
+    // Path of the library selection. selected_model is the index of that path and is
+    // recomputed when a scan drops a row, so other pages do not follow a shifted index.
+    std::filesystem::path selected_path;
+
     const ModelInfo* selected() const {
         return selected_model >= 0 && selected_model < static_cast<int>(library.size())
                    ? &library[static_cast<size_t>(selected_model)]
                    : nullptr;
+    }
+
+    void set_selected_index(int index) {
+        if (index < 0 || static_cast<size_t>(index) >= library.size()) {
+            selected_model = -1;
+            selected_path.clear();
+            return;
+        }
+        selected_model = index;
+        selected_path = library[static_cast<size_t>(index)].path;
+    }
+
+    // Point selected_model at selected_path. Keeps the path when the file is absent this frame.
+    void rebind_selected() {
+        if (selected_path.empty()) {
+            selected_model = -1;
+            return;
+        }
+        for (int i = 0; i < static_cast<int>(library.size()); ++i) {
+            if (library[static_cast<size_t>(i)].path == selected_path) {
+                selected_model = i;
+                return;
+            }
+        }
+        selected_model = -1;
     }
 };
 

@@ -12,7 +12,13 @@
 #include <map>
 #include <set>
 #include <string_view>
+#include <system_error>
 #include <utility>
+#include <vector>
+
+#ifndef _WIN32
+#include <sys/stat.h>
+#endif
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -22,6 +28,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include <aclapi.h>
 #endif
 
 namespace waffle {
@@ -365,18 +372,171 @@ void require_model(sqlite3* db, const std::string& path) {
     if (!query.step()) throw Error("Unknown model: " + path);
 }
 
+#ifndef _WIN32
+class PrivateUmask {
+public:
+    PrivateUmask() : previous_(::umask(0077)) {}
+    ~PrivateUmask() { ::umask(previous_); }
+    PrivateUmask(const PrivateUmask&) = delete;
+    PrivateUmask& operator=(const PrivateUmask&) = delete;
+
+private:
+    mode_t previous_;
+};
+#endif
+
+bool is_link(const std::filesystem::path& path) {
+#ifdef _WIN32
+    const auto attrs = GetFileAttributesW(path.c_str());
+    if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_REPARSE_POINT) != 0) return true;
+#endif
+    std::error_code ec;
+    return std::filesystem::is_symlink(std::filesystem::symlink_status(path, ec));
+}
+
+#ifdef _WIN32
+void restrict_to_current_user(const std::filesystem::path& path, bool directory) {
+    HANDLE token = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token))
+        throw Error("Database: cannot read the user token");
+    struct Close {
+        HANDLE handle;
+        ~Close() {
+            if (handle) CloseHandle(handle);
+        }
+    } close{token};
+    DWORD bytes = 0;
+    GetTokenInformation(token, TokenUser, nullptr, 0, &bytes);
+    std::vector<unsigned char> buffer(bytes ? bytes : 1);
+    if (!GetTokenInformation(token, TokenUser, buffer.data(), static_cast<DWORD>(buffer.size()), &bytes))
+        throw Error("Database: cannot read the user token");
+    auto* user = reinterpret_cast<TOKEN_USER*>(buffer.data());
+    EXPLICIT_ACCESSW entry{};
+    entry.grfAccessPermissions = GENERIC_ALL;
+    entry.grfAccessMode = SET_ACCESS;
+    entry.grfInheritance = directory ? OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE : NO_INHERITANCE;
+    entry.Trustee.TrusteeForm = TRUSTEE_IS_SID;
+    entry.Trustee.TrusteeType = TRUSTEE_IS_USER;
+    entry.Trustee.ptstrName = reinterpret_cast<LPWSTR>(user->User.Sid);
+    PACL acl = nullptr;
+    if (SetEntriesInAclW(1, &entry, nullptr, &acl) != ERROR_SUCCESS || !acl)
+        throw Error("Database: cannot restrict permissions for " + utf8_from_path(path));
+    struct Free {
+        PACL acl;
+        ~Free() {
+            if (acl) LocalFree(acl);
+        }
+    } free_acl{acl};
+    auto wide = path.wstring();
+    const DWORD rc = SetNamedSecurityInfoW(wide.data(), SE_FILE_OBJECT,
+                                           DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION, nullptr,
+                                           nullptr, acl, nullptr);
+    if (rc != ERROR_SUCCESS) throw Error("Database: cannot restrict permissions for " + utf8_from_path(path));
+}
+#endif
+
+void restrict_directory(const std::filesystem::path& dir) {
+#ifdef _WIN32
+    restrict_to_current_user(dir, true);
+#else
+    std::error_code ec;
+    std::filesystem::permissions(dir, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace, ec);
+    if (ec) throw Error("Database: cannot restrict directory permissions for " + utf8_from_path(dir));
+#endif
+}
+
+void restrict_file(const std::filesystem::path& file) {
+    std::error_code ec;
+    const auto status = std::filesystem::symlink_status(file, ec);
+    if (ec || !std::filesystem::exists(status)) return;
+    if (is_link(file)) throw Error("Database: path is a link: " + utf8_from_path(file));
+#ifdef _WIN32
+    restrict_to_current_user(file, false);
+#else
+    std::filesystem::permissions(file, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
+                                 std::filesystem::perm_options::replace, ec);
+    if (ec) throw Error("Database: cannot restrict permissions for " + utf8_from_path(file));
+#endif
+}
+
+std::filesystem::path sidecar(const std::filesystem::path& db_path, const char* suffix) {
+#ifdef _WIN32
+    return std::filesystem::path(db_path.wstring() + std::filesystem::path(suffix).wstring());
+#else
+    return std::filesystem::path(db_path.string() + suffix);
+#endif
+}
+
+void prepare_private_directory(const std::filesystem::path& dir) {
+    if (dir.empty()) throw Error("Database: empty directory");
+    const auto parent = dir.parent_path();
+    if (!parent.empty() && parent != dir) {
+        std::error_code ec;
+        const auto parent_status = std::filesystem::symlink_status(parent, ec);
+        if (ec || !std::filesystem::exists(parent_status)) {
+            ec.clear();
+            std::filesystem::create_directories(parent, ec);
+            if (ec) throw Error("Database: Cannot create directory " + utf8_from_path(parent));
+        }
+    }
+    if (is_link(dir)) throw Error("Database: directory is a link: " + utf8_from_path(dir));
+    std::error_code ec;
+    const auto status = std::filesystem::symlink_status(dir, ec);
+    if (!ec && std::filesystem::exists(status) && !std::filesystem::is_directory(status))
+        throw Error("Database: path is not a directory: " + utf8_from_path(dir));
+    if (ec || !std::filesystem::is_directory(status)) {
+        ec.clear();
+        std::filesystem::create_directory(dir, ec);
+        if (is_link(dir)) throw Error("Database: directory is a link: " + utf8_from_path(dir));
+        std::error_code after;
+        if (!std::filesystem::is_directory(std::filesystem::symlink_status(dir, after)) || after)
+            throw Error("Database: Cannot create directory " + utf8_from_path(dir));
+    }
+    restrict_directory(dir);
+}
+
+std::filesystem::path default_directory() {
+#ifdef _WIN32
+    auto from_env = [](const wchar_t* name) {
+        const DWORD needed = GetEnvironmentVariableW(name, nullptr, 0);
+        if (needed == 0) return std::filesystem::path{};
+        std::wstring value(needed, L'\0');
+        const DWORD written = GetEnvironmentVariableW(name, value.data(), needed);
+        if (written == 0 || written >= needed) return std::filesystem::path{};
+        value.resize(written);
+        return std::filesystem::path(value);
+    };
+    if (const auto local = from_env(L"LOCALAPPDATA"); !local.empty()) return local / "WaffleIron";
+    if (const auto profile = from_env(L"USERPROFILE"); !profile.empty())
+        return profile / "AppData" / "Local" / "WaffleIron";
+    throw Error("No local application data directory for the library database (set LOCALAPPDATA)");
+#elif defined(__APPLE__)
+    const char* home = std::getenv("HOME");
+    if (!home || !*home) throw Error("No home directory for the library database (set HOME)");
+    return std::filesystem::path(home) / "Library" / "Application Support" / "WaffleIron";
+#else
+    if (const char* xdg = std::getenv("XDG_DATA_HOME"); xdg && *xdg) return std::filesystem::path(xdg) / "WaffleIron";
+    if (const char* home = std::getenv("HOME"); home && *home)
+        return std::filesystem::path(home) / ".local" / "share" / "WaffleIron";
+    throw Error("No home directory for the library database (set HOME or XDG_DATA_HOME)");
+#endif
+}
+
 } // namespace
 
 Store::Store(const std::filesystem::path& db_path) {
+#ifndef _WIN32
+    [[maybe_unused]] PrivateUmask private_files;
+#endif
     const auto parent = db_path.parent_path();
-    if (!parent.empty()) {
-        std::error_code ec;
-        std::filesystem::create_directories(parent, ec);
-        if (ec) throw Error("Database: Cannot create directory " + utf8_from_path(parent));
-    }
+    if (!parent.empty()) prepare_private_directory(parent);
+    if (is_link(db_path)) throw Error("Database: path is a link: " + utf8_from_path(db_path));
 
-    const int rc =
-        sqlite3_open_v2(utf8_from_path(db_path).c_str(), &db_, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nullptr);
+    int flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE;
+#if !defined(_WIN32) && defined(SQLITE_OPEN_NOFOLLOW)
+    flags |= SQLITE_OPEN_NOFOLLOW;
+#endif
+    const int rc = sqlite3_open_v2(utf8_from_path(db_path).c_str(), &db_, flags, nullptr);
     if (rc != SQLITE_OK || !db_) {
         std::string msg = db_ ? sqlite3_errmsg(db_) : "Cannot open";
         if (db_) sqlite3_close(db_);
@@ -385,9 +545,13 @@ Store::Store(const std::filesystem::path& db_path) {
     }
 
     try {
+        restrict_file(db_path);
         exec_sql(db_, "PRAGMA journal_mode = WAL");
         exec_sql(db_, "PRAGMA foreign_keys = ON");
         exec_sql(db_, "PRAGMA busy_timeout = 5000");
+        restrict_file(db_path);
+        restrict_file(sidecar(db_path, "-wal"));
+        restrict_file(sidecar(db_path, "-shm"));
         migrate(db_);
     } catch (...) {
         sqlite3_close(db_);
@@ -402,34 +566,11 @@ Store::~Store() {
 }
 
 std::filesystem::path Store::default_path() {
-#ifdef _WIN32
-    std::filesystem::path dir;
-    const DWORD needed = GetEnvironmentVariableW(L"LOCALAPPDATA", nullptr, 0);
-    if (needed > 0) {
-        std::wstring value(needed, L'\0');
-        const DWORD written = GetEnvironmentVariableW(L"LOCALAPPDATA", value.data(), needed);
-        if (written > 0 && written < needed) {
-            value.resize(written);
-            dir = std::filesystem::path(value);
-        }
-    }
-    if (dir.empty()) dir = std::filesystem::temp_directory_path();
-    dir /= "WaffleIron";
-#elif defined(__APPLE__)
-    const char* home = std::getenv("HOME");
-    std::filesystem::path dir = home && *home
-                                    ? std::filesystem::path(home) / "Library" / "Application Support" / "WaffleIron"
-                                    : std::filesystem::temp_directory_path() / "WaffleIron";
-#else
-    std::filesystem::path dir;
-    if (const char* xdg = std::getenv("XDG_DATA_HOME"); xdg && *xdg)
-        dir = std::filesystem::path(xdg) / "WaffleIron";
-    else if (const char* home = std::getenv("HOME"); home && *home)
-        dir = std::filesystem::path(home) / ".local" / "share" / "WaffleIron";
-    else
-        dir = std::filesystem::temp_directory_path() / "WaffleIron";
+#ifndef _WIN32
+    [[maybe_unused]] PrivateUmask private_files;
 #endif
-    std::filesystem::create_directories(dir);
+    const auto dir = default_directory();
+    prepare_private_directory(dir);
     return dir / "waffle.db";
 }
 
@@ -543,8 +684,7 @@ void Store::remove_missing_models() {
         Stmt stmt(db_, "SELECT path FROM models");
         while (stmt.step()) {
             const std::string path = stmt.text(0);
-            std::error_code ec;
-            if (!std::filesystem::is_regular_file(path_from_utf8(path), ec)) stale.push_back(path);
+            if (model_file_is_gone(path_from_utf8(path))) stale.push_back(path);
         }
     }
     if (stale.empty()) return;

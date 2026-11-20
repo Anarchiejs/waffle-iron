@@ -31,6 +31,14 @@ void push_font(ImFont* font, float scale = 1.0f);
 std::string model_title(const ModelInfo& m);
 std::string model_details(const ModelInfo& m);
 
+// Index of a library row by its path, or -1 when that file is not in the list.
+inline int index_of_model(const std::vector<ModelInfo>& library, const std::filesystem::path& path) {
+    if (path.empty()) return -1;
+    for (int i = 0; i < static_cast<int>(library.size()); ++i)
+        if (library[static_cast<size_t>(i)].path == path) return i;
+    return -1;
+}
+
 // Single-line text, cut with "…" when it passes max_x (font nullptr: current font).
 void text_ellipsis(ImDrawList* dl, ImFont* font, float size, ImVec2 pos, float max_x, ImU32 color,
                    const std::string& text);

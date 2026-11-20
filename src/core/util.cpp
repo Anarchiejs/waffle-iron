@@ -3,10 +3,23 @@
 #include "core/types.hpp"
 
 #include <chrono>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
 #include <fstream>
+#include <iterator>
+#include <system_error>
+
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 namespace waffle {
 
@@ -18,6 +31,95 @@ std::string utf8_from_path(const std::filesystem::path& path) {
 std::filesystem::path path_from_utf8(std::string_view utf8) {
     const std::u8string u8(reinterpret_cast<const char8_t*>(utf8.data()), utf8.size());
     return {u8};
+}
+
+namespace {
+std::string_view trim_copy_span(std::string_view text) {
+    while (!text.empty() && (text.front() == ' ' || text.front() == '\t')) text.remove_prefix(1);
+    while (!text.empty() && (text.back() == ' ' || text.back() == '\t')) text.remove_suffix(1);
+    return text;
+}
+} // namespace
+
+std::filesystem::path expand_user_path(std::string_view text) {
+    text = trim_copy_span(text);
+    if (text.empty()) return {};
+#ifdef _WIN32
+    auto wide = path_from_utf8(text).wstring();
+    if (wide == L"~" || wide.starts_with(L"~/") || wide.starts_with(L"~\\")) {
+        wchar_t profile[32768];
+        const DWORD n = GetEnvironmentVariableW(L"USERPROFILE", profile, static_cast<DWORD>(std::size(profile)));
+        if (n > 0 && n < std::size(profile)) wide = std::wstring(profile, profile + n) + wide.substr(1);
+    }
+    const DWORD need = ExpandEnvironmentStringsW(wide.c_str(), nullptr, 0);
+    if (need == 0) return path_from_utf8(text);
+    std::wstring expanded(need, L'\0');
+    if (ExpandEnvironmentStringsW(wide.c_str(), expanded.data(), need) == 0) return path_from_utf8(text);
+    if (!expanded.empty() && expanded.back() == L'\0') expanded.pop_back();
+    return std::filesystem::path(expanded);
+#else
+    std::string in(text);
+    if (in == "~" || in.starts_with("~/")) {
+        if (const char* home = std::getenv("HOME"); home && *home) in = std::string(home) + in.substr(1);
+    }
+    std::string out;
+    out.reserve(in.size());
+    for (size_t i = 0; i < in.size();) {
+        if (in[i] != '$' || i + 1 >= in.size()) {
+            out.push_back(in[i++]);
+            continue;
+        }
+        std::string name;
+        size_t next = i + 1;
+        if (in[next] == '{') {
+            const auto end = in.find('}', next + 1);
+            if (end == std::string::npos) {
+                out.push_back(in[i++]);
+                continue;
+            }
+            name = in.substr(next + 1, end - (next + 1));
+            next = end + 1;
+        } else {
+            size_t j = next;
+            while (j < in.size() && (std::isalnum(static_cast<unsigned char>(in[j])) || in[j] == '_')) ++j;
+            name = in.substr(next, j - next);
+            next = j;
+        }
+        if (name.empty()) {
+            out.push_back(in[i++]);
+            continue;
+        }
+        if (const char* value = std::getenv(name.c_str()); value) {
+            out += value;
+            i = next;
+            continue;
+        }
+        out.append(in, i, next - i);
+        i = next;
+    }
+    return path_from_utf8(out);
+#endif
+}
+
+bool model_file_is_gone(const std::filesystem::path& path) {
+    std::error_code ec;
+    const auto status = std::filesystem::status(path, ec);
+    if (std::filesystem::is_regular_file(status)) return false;
+    // libstdc++ reports a missing path as no_such_file_or_directory rather than a cleared error.
+    // Any other error (permission, I/O) means the file is not confirmed gone.
+    if (ec && ec != std::errc::no_such_file_or_directory) return false;
+    for (auto parent = path.parent_path(); !parent.empty();) {
+        std::error_code parent_ec;
+        const auto parent_status = std::filesystem::status(parent, parent_ec);
+        if (parent_ec == std::errc::no_such_file_or_directory ||
+            (!parent_ec && !std::filesystem::exists(parent_status)))
+            return false;
+        if (parent_ec) return false;
+        const auto next = parent.parent_path();
+        if (next == parent) break;
+        parent = std::move(next);
+    }
+    return true;
 }
 
 std::filesystem::path canonical_path(const std::filesystem::path& path) {

@@ -52,7 +52,7 @@ class VramView final : public View {
     const ModelInfo* config(AppContext& ctx, const VramEstimate* estimate, const std::optional<GpuSample>& sample) {
         card_title("Configuration", "Simulated load settings.");
         field_label("Model");
-        model_combo("##model", ctx, ctx.selected_model);
+        if (model_combo("##model", ctx, ctx.selected_model)) ctx.set_selected_index(ctx.selected_model);
         const auto* selected = ctx.selected();
         if (!selected) {
             ImGui::Dummy({0, em(.2f)});
@@ -119,24 +119,30 @@ class VramView final : public View {
         auto* telemetry = &ctx.telemetry;
         auto* store = &ctx.store;
         const auto params = params_;
-        checking_ = std::async(std::launch::async, [engine, telemetry, store, params, estimated] {
-            const ModelInfo model = read_gguf(params.model_path, false);
-            const auto verified = verify_model_vram(*engine, telemetry, model, plan_input(params), params);
-            VramCheck result;
-            result.model_path = path_utf8(params.model_path);
-            result.config = config_label(params);
-            result.estimated_gpu = estimated ? estimated : verified.estimated_gpu;
-            const bool measured = verified.note.empty() || verified.note.starts_with("Metal reports");
-            if (measured) {
-                result.measured_gpu = verified.measured_gpu;
-            } else {
-                result.config += " (memory not measured)";
-                result.measured_gpu = 0;
-            }
-            result.timestamp = now_iso();
-            store->save_vram_check(result);
-            return result;
-        });
+        const auto cached = cache_.find(params.model_path);
+        if (cached == cache_.end() || cached->second.tensors.empty()) {
+            ctx.notify("Reread the model with its tensors to estimate VRAM", true);
+            return;
+        }
+        ModelInfo model = cached->second;
+        checking_ =
+            std::async(std::launch::async, [engine, telemetry, store, params, estimated, model = std::move(model)] {
+                const auto verified = verify_model_vram(*engine, telemetry, model, plan_input(params), params);
+                VramCheck result;
+                result.model_path = path_utf8(params.model_path);
+                result.config = config_label(params);
+                result.estimated_gpu = estimated ? estimated : verified.estimated_gpu;
+                const bool measured = verified.note.empty() || verified.note.starts_with("Metal reports");
+                if (measured) {
+                    result.measured_gpu = verified.measured_gpu;
+                } else {
+                    result.config += " (memory not measured)";
+                    result.measured_gpu = 0;
+                }
+                result.timestamp = now_iso();
+                store->save_vram_check(result);
+                return result;
+            });
     }
     void results(AppContext& ctx, const ModelInfo& model, const VramEstimate& estimate,
                  const std::optional<GpuSample>& sample) {

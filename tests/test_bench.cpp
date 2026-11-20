@@ -75,6 +75,17 @@ TEST_CASE("bench: Cartesian product and base values", "[bench]") {
     REQUIRE(configs.size() == 16);
     CHECK(configs[0].load.type_k == "q4_0");
     CHECK(configs[0].load.type_v == "f16");
+
+    CampaignGrid capped;
+    capped.n_gpu_layers.assign(100, 1);
+    capped.n_ctx.assign(100, 512);
+    CHECK(campaign_configuration_count(capped) == 10000);
+    CHECK(expand_grid(capped).size() == 10000);
+    capped.n_ctx.push_back(1024);
+    CHECK_THROWS_AS(campaign_configuration_count(capped), Error);
+    CHECK_THROWS_AS(expand_grid(capped), Error);
+    CHECK(within_campaign_limit(100, 100) == 10000);
+    CHECK_THROWS_AS(within_campaign_limit(5000, 3), Error);
 }
 
 TEST_CASE("bench: stable exports and escaping", "[bench]") {
@@ -108,6 +119,14 @@ TEST_CASE("bench: stable exports and escaping", "[bench]") {
     CHECK(std::count(empty_md.begin(), empty_md.end(), '\n') == 2);
     r.model_name = "next\nline";
     CHECK(to_csv({r}).find("\"next\nline\"") != std::string::npos);
+    for (const char* formula : {"=1+1", "+sum", "-sum", "@sum"}) {
+        r.model_name = formula;
+        const auto cell = std::string("\"'") + formula + "\"";
+        CHECK(to_csv({r}).find(cell) != std::string::npos);
+    }
+    r.model_name = "plain";
+    r.gpu_name = "=HYPERLINK()";
+    CHECK(to_csv({r}).find("\"'=HYPERLINK()\"") != std::string::npos);
     CHECK(to_markdown({r}).find("next<br>line") != std::string::npos);
     // A comma-decimal locale must not leak into the CSV.
     struct Comma : std::numpunct<char> {
